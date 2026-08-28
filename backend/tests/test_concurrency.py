@@ -27,6 +27,29 @@ def test_two_workers_atomic_job_claim(db, tenant_a):
     claim_b = claim_next_job(db, worker_id="worker_b", lease_duration_seconds=60)
     assert claim_b is None  # Worker B gets nothing
 
+def test_active_lease_not_stolen_by_recovery(db, tenant_a):
+    channel = Channel(tenant_id=tenant_a["tenant"].id, telegram_chat_id="-100888777444", title="Active Lease Channel", is_connected=True)
+    db.add(channel)
+    db.flush()
+
+    auto = Automation(tenant_id=tenant_a["tenant"].id, channel_id=channel.id, name="Active Auto", trigger_value="ACTIVE", is_active=True)
+    db.add(auto)
+    db.flush()
+
+    # Job with active valid lease (expires in 60s)
+    active_lease = datetime.now(timezone.utc) + timedelta(seconds=60)
+    job = Job(tenant_id=tenant_a["tenant"].id, automation_id=auto.id, channel_id=channel.id, idempotency_key="active_lease_job", trigger_text="ACTIVE", status="RUNNING", lease_owner="healthy_worker", lease_expires_at=active_lease)
+    db.add(job)
+    db.commit()
+
+    # Recovery worker attempts recovery
+    recovered_count = recover_expired_leases(db, worker_id="recovery_daemon")
+    assert recovered_count == 0  # Active job MUST NOT be stolen
+
+    db.refresh(job)
+    assert job.status == "RUNNING"
+    assert job.lease_owner == "healthy_worker"
+
 def test_stale_lease_recovery_concurrency(db, tenant_a):
     channel = Channel(tenant_id=tenant_a["tenant"].id, telegram_chat_id="-100888777555", title="Stale Channel", is_connected=True)
     db.add(channel)
@@ -49,3 +72,25 @@ def test_stale_lease_recovery_concurrency(db, tenant_a):
     db.refresh(job)
     assert job.status == "PENDING"
     assert job.lease_owner is None
+
+def test_two_recovery_workers_concurrency(db, tenant_a):
+    channel = Channel(tenant_id=tenant_a["tenant"].id, telegram_chat_id="-100888777333", title="Multi Stale Channel", is_connected=True)
+    db.add(channel)
+    db.flush()
+
+    auto = Automation(tenant_id=tenant_a["tenant"].id, channel_id=channel.id, name="Multi Stale Auto", trigger_value="STALE2", is_active=True)
+    db.add(auto)
+    db.flush()
+
+    expired = datetime.now(timezone.utc) - timedelta(minutes=5)
+    job = Job(tenant_id=tenant_a["tenant"].id, automation_id=auto.id, channel_id=channel.id, idempotency_key="multi_stale_job", trigger_text="STALE2", status="CLAIMED", lease_owner="dead_w1", lease_expires_at=expired)
+    db.add(job)
+    db.commit()
+
+    # Worker 1 recovers
+    r1 = recover_expired_leases(db, worker_id="recovery_w1")
+    assert r1 == 1
+
+    # Worker 2 attempts recovery immediately after
+    r2 = recover_expired_leases(db, worker_id="recovery_w2")
+    assert r2 == 0  # Already recovered, cannot recover twice
