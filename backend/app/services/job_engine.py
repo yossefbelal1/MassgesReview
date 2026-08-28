@@ -144,24 +144,25 @@ def claim_next_job(db: Session, worker_id: str, lease_duration_seconds: int = 60
 
 def recover_expired_leases(db: Session, worker_id: str) -> int:
     """
-    HEARTBEAT & LEASE-AWARE CRASH RECOVERY:
-    Recovers only jobs whose lease has legitimately expired.
-    Never steals actively running jobs from valid live workers.
+    ATOMIC LEASE-AWARE CRASH RECOVERY:
+    Atomically updates expired jobs in a single atomic SQL UPDATE statement.
+    Prevents race conditions where multiple workers try to recover the same job simultaneously.
+    Never steals actively running jobs with valid leases from live workers.
     """
     now_utc = datetime.now(timezone.utc)
-    expired_jobs = db.query(Job).filter(
+    recovered_count = db.query(Job).filter(
         Job.status.in_(["CLAIMED", "RUNNING"]),
         Job.lease_expires_at < now_utc
-    ).all()
-
-    recovered_count = 0
-    for j in expired_jobs:
-        j.status = "PENDING"
-        j.error_message = f"Recovered from expired lease (previous owner: {j.lease_owner})"
-        j.lease_owner = None
-        j.lease_expires_at = None
-        j.updated_at = now_utc
-        recovered_count += 1
+    ).update(
+        {
+            Job.status: "PENDING",
+            Job.error_message: f"Recovered from expired lease by worker {worker_id}",
+            Job.lease_owner: None,
+            Job.lease_expires_at: None,
+            Job.updated_at: now_utc
+        },
+        synchronize_session="fetch"
+    )
 
     if recovered_count > 0:
         db.commit()
@@ -169,23 +170,26 @@ def recover_expired_leases(db: Session, worker_id: str) -> int:
 
 def renew_job_lease(db: Session, job_id: str, worker_id: str, additional_seconds: int = 60) -> bool:
     """
-    JOB-LEVEL LEASE RENEWAL:
+    ATOMIC JOB-LEVEL LEASE RENEWAL:
     Renews the lease of an actively executing job so long-running operations never get stolen.
     Only the legitimate lease owner can renew their lease.
     """
     now_utc = datetime.now(timezone.utc)
-    job = db.query(Job).filter(
+    updated_rows = db.query(Job).filter(
         Job.id == job_id,
         Job.lease_owner == worker_id,
         Job.status == "RUNNING"
-    ).first()
-    if not job:
-        return False
-
-    job.lease_expires_at = now_utc + timedelta(seconds=additional_seconds)
-    job.updated_at = now_utc
-    db.commit()
-    return True
+    ).update(
+        {
+            Job.lease_expires_at: now_utc + timedelta(seconds=additional_seconds),
+            Job.updated_at: now_utc
+        },
+        synchronize_session="fetch"
+    )
+    if updated_rows > 0:
+        db.commit()
+        return True
+    return False
 
 def update_worker_heartbeat(db: Session, worker_id: str, hostname: str = "localhost", details: Dict[str, Any] = None):
     """Updates persistent worker heartbeat in database."""
