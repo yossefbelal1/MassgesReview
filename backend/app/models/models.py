@@ -192,13 +192,14 @@ class PublishingHistory(Base):
     message_title = Column(String, nullable=True)
     automation_name = Column(String, nullable=True)
     step_number = Column(Integer, default=1)
-    status = Column(String, default="SUCCESS")  # SUCCESS, FAILED, FLOOD_WAIT
+    status = Column(String, default="SUCCESS")  # PUBLISHING, SUCCESS, ASSUMED_DELIVERED, FAILED, FLOOD_WAIT
     telegram_message_id = Column(String, nullable=True)
     error_details = Column(Text, nullable=True)
     published_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_history_tenant_published", "tenant_id", "published_at"),
+        Index("idx_history_job_step", "job_id", "step_number"),
     )
 
     tenant = relationship("Tenant", back_populates="history")
