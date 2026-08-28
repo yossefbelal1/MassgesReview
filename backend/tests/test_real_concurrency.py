@@ -516,3 +516,136 @@ async def test_full_crash_and_recovery_lifecycle():
     ).all()
     assert len(all_history) == 2
     sess.close()
+
+
+# ===================================================================
+# BLOCKER 4 — Concurrent publishing step uniqueness & transaction safety
+# ===================================================================
+
+def test_concurrent_publishing_step_uniqueness_enforced_by_db():
+    """
+    Two threads concurrently attempt to insert a PublishingHistory record
+    for the exact same (job_id, step_number=1).
+    
+    Expected Invariant:
+    - Exactly 1 thread successfully commits.
+    - The other thread catches IntegrityError / rolls back.
+    - Exactly 1 durable record exists in the database.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    setup = _make_session()
+    tenant = _seed_tenant(setup)
+    ch, auto = _seed_channel_auto(setup, tenant)
+
+    job = Job(
+        tenant_id=tenant.id,
+        automation_id=auto.id,
+        channel_id=ch.id,
+        idempotency_key=f"conc_step_uniq_{time.time_ns()}",
+        trigger_text="CONC",
+        status="RUNNING",
+    )
+    setup.add(job)
+    setup.commit()
+    job_id = job.id
+    ch_id = ch.id
+    t_id = tenant.id
+    auto_name = auto.name
+    setup.close()
+
+    barrier = threading.Barrier(2, timeout=10)
+    results = [None, None]
+
+    def insert_worker(idx, worker_name):
+        sess = _make_session()
+        try:
+            h = PublishingHistory(
+                tenant_id=t_id,
+                job_id=job_id,
+                channel_id=ch_id,
+                message_title=f"Review from {worker_name}",
+                automation_name=auto_name,
+                step_number=1,
+                status="PUBLISHING",
+            )
+            barrier.wait()
+            sess.add(h)
+            sess.commit()
+            results[idx] = "SUCCESS"
+        except IntegrityError:
+            sess.rollback()
+            results[idx] = "INTEGRITY_ERROR_CAUGHT"
+        except Exception as exc:
+            sess.rollback()
+            results[idx] = f"ERROR: {exc}"
+        finally:
+            sess.close()
+
+    t1 = threading.Thread(target=insert_worker, args=(0, "W1"))
+    t2 = threading.Thread(target=insert_worker, args=(1, "W2"))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert "SUCCESS" in results, f"Expected 1 SUCCESS, got {results}"
+    assert "INTEGRITY_ERROR_CAUGHT" in results, f"Expected 1 INTEGRITY_ERROR_CAUGHT, got {results}"
+
+    # Verify database has exactly 1 row
+    verify = _make_session()
+    rows = verify.query(PublishingHistory).filter(
+        PublishingHistory.job_id == job_id,
+        PublishingHistory.step_number == 1,
+    ).all()
+    assert len(rows) == 1
+    verify.close()
+
+
+def test_transaction_rollback_preserves_job_recoverability():
+    """
+    Verifies that when a worker encounters an error during execution and rolls back,
+    the database transaction is cleanly aborted, and the job is left in a state
+    where lease recovery or manual retry can proceed without database corruption.
+    """
+    sess = _make_session()
+    tenant = _seed_tenant(sess)
+    ch, auto = _seed_channel_auto(sess, tenant)
+
+    job = Job(
+        tenant_id=tenant.id,
+        automation_id=auto.id,
+        channel_id=ch.id,
+        idempotency_key=f"rollback_test_{time.time_ns()}",
+        trigger_text="CONC",
+        status="RUNNING",
+        lease_owner="crashed_w",
+        lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=10),
+    )
+    sess.add(job)
+    sess.commit()
+    job_id = job.id
+
+    # Simulated worker unhandled exception -> transaction rollback
+    try:
+        # Dirty work in transaction
+        sess.query(Job).filter(Job.id == job_id).update({"status": "CORRUPTED_TEMP"})
+        raise RuntimeError("Simulated mid-flight worker process crash")
+    except RuntimeError:
+        sess.rollback()
+
+    # Session is clean, job status is preserved as RUNNING with expired lease
+    j = sess.query(Job).filter(Job.id == job_id).first()
+    assert j.status == "RUNNING"
+    assert j.lease_owner == "crashed_w"
+
+    # Recovery daemon can now cleanly recover the job
+    recovered = recover_expired_leases(sess, worker_id="recovery_daemon")
+    assert recovered == 1
+
+    sess.expire_all()
+    j_after = sess.query(Job).filter(Job.id == job_id).first()
+    assert j_after.status == "PENDING"
+    assert j_after.lease_owner is None
+    sess.close()
+

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import text, or_, and_
+from sqlalchemy.exc import IntegrityError
 from telethon import TelegramClient, types
 from telethon.errors import FloodWaitError, ChatWriteForbiddenError, ChannelPrivateError, RPCError
 
@@ -76,20 +77,29 @@ def ingest_channel_messages(
                 idempotency_key = f"{channel.id}:{msg.id}:{auto.id}"
                 existing_job = db.query(Job).filter(Job.idempotency_key == idempotency_key).first()
                 if not existing_job:
-                    job = Job(
-                        tenant_id=channel.tenant_id,
-                        automation_id=auto.id,
-                        channel_id=channel.id,
-                        idempotency_key=idempotency_key,
-                        trigger_message_id=str(msg.id),
-                        trigger_text=msg_text,
-                        current_step=1,
-                        total_steps=auto.reviews_count or 2,
-                        status="PENDING",
-                        execute_at=now_utc
-                    )
-                    db.add(job)
-                    created_jobs_count += 1
+                    try:
+                        # Use a nested transaction (SAVEPOINT) for atomic, race-safe job creation.
+                        # If another worker races to create the same idempotency_key, the unique
+                        # index will raise IntegrityError, cleanly rolling back this savepoint without
+                        # corrupting the outer database session or crashing the ingestion batch.
+                        with db.begin_nested():
+                            job = Job(
+                                tenant_id=channel.tenant_id,
+                                automation_id=auto.id,
+                                channel_id=channel.id,
+                                idempotency_key=idempotency_key,
+                                trigger_message_id=str(msg.id),
+                                trigger_text=msg_text,
+                                current_step=1,
+                                total_steps=auto.reviews_count or 2,
+                                status="PENDING",
+                                execute_at=now_utc
+                            )
+                            db.add(job)
+                            db.flush()
+                            created_jobs_count += 1
+                    except IntegrityError:
+                        logger.info("Concurrent duplicate job insertion safely ignored for key %s", idempotency_key)
 
     db.commit()
 
@@ -430,18 +440,30 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
 
                 if not intent_record:
                     # ── PHASE 1: Write durable publish INTENT before Telegram call ──
-                    intent_record = PublishingHistory(
-                        tenant_id=tenant.id,
-                        job_id=job.id,
-                        channel_id=channel.id,
-                        message_title=f"Review from {fwd_name}",
-                        automation_name=auto.name,
-                        step_number=idx,
-                        status="PUBLISHING",       # Intent — not yet confirmed
-                        telegram_message_id=None,
-                    )
-                    db.add(intent_record)
-                    db.commit()  # ← DURABLE: if we crash after this, the intent survives
+                    try:
+                        intent_record = PublishingHistory(
+                            tenant_id=tenant.id,
+                            job_id=job.id,
+                            channel_id=channel.id,
+                            message_title=f"Review from {fwd_name}",
+                            automation_name=auto.name,
+                            step_number=idx,
+                            status="PUBLISHING",       # Intent — not yet confirmed
+                            telegram_message_id=None,
+                        )
+                        db.add(intent_record)
+                        db.commit()  # ← DURABLE: if we crash after this, the intent survives
+                    except IntegrityError:
+                        db.rollback()
+                        # Another concurrent worker already wrote the intent row for this exact step.
+                        intent_record = db.query(PublishingHistory).filter(
+                            PublishingHistory.job_id == job.id,
+                            PublishingHistory.step_number == idx,
+                        ).first()
+                        if intent_record and intent_record.status == "SUCCESS":
+                            job.current_step = idx + 1
+                            db.commit()
+                            continue
 
                 try:
                     # ── PHASE 2: Execute external side-effect (Telegram) ──
