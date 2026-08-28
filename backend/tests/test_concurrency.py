@@ -94,3 +94,31 @@ def test_two_recovery_workers_concurrency(db, tenant_a):
     # Worker 2 attempts recovery immediately after
     r2 = recover_expired_leases(db, worker_id="recovery_w2")
     assert r2 == 0  # Already recovered, cannot recover twice
+
+def test_lease_renewal_for_long_running_jobs(db, tenant_a):
+    from backend.app.services.job_engine import renew_job_lease
+    channel = Channel(tenant_id=tenant_a["tenant"].id, telegram_chat_id="-100888777222", title="Long Running Channel", is_connected=True)
+    db.add(channel)
+    db.flush()
+
+    auto = Automation(tenant_id=tenant_a["tenant"].id, channel_id=channel.id, name="Long Auto", trigger_value="LONG", is_active=True)
+    db.add(auto)
+    db.flush()
+
+    # Job leased with short initial expiry (1 second in future)
+    initial_expiry = datetime.now(timezone.utc) + timedelta(seconds=1)
+    job = Job(tenant_id=tenant_a["tenant"].id, automation_id=auto.id, channel_id=channel.id, idempotency_key="long_job_lease", trigger_text="LONG", status="RUNNING", lease_owner="active_worker", lease_expires_at=initial_expiry)
+    db.add(job)
+    db.commit()
+
+    # Legitimate worker renews lease
+    renewed = renew_job_lease(db, job.id, worker_id="active_worker", additional_seconds=120)
+    assert renewed is True
+
+    # Unauthorized worker attempts to renew -> fails
+    imposter_renewed = renew_job_lease(db, job.id, worker_id="imposter_worker", additional_seconds=120)
+    assert imposter_renewed is False
+
+    db.refresh(job)
+    exp = job.lease_expires_at.replace(tzinfo=timezone.utc) if job.lease_expires_at.tzinfo is None else job.lease_expires_at
+    assert exp > datetime.now(timezone.utc) + timedelta(seconds=100)

@@ -167,6 +167,26 @@ def recover_expired_leases(db: Session, worker_id: str) -> int:
         db.commit()
     return recovered_count
 
+def renew_job_lease(db: Session, job_id: str, worker_id: str, additional_seconds: int = 60) -> bool:
+    """
+    JOB-LEVEL LEASE RENEWAL:
+    Renews the lease of an actively executing job so long-running operations never get stolen.
+    Only the legitimate lease owner can renew their lease.
+    """
+    now_utc = datetime.now(timezone.utc)
+    job = db.query(Job).filter(
+        Job.id == job_id,
+        Job.lease_owner == worker_id,
+        Job.status == "RUNNING"
+    ).first()
+    if not job:
+        return False
+
+    job.lease_expires_at = now_utc + timedelta(seconds=additional_seconds)
+    job.updated_at = now_utc
+    db.commit()
+    return True
+
 def update_worker_heartbeat(db: Session, worker_id: str, hostname: str = "localhost", details: Dict[str, Any] = None):
     """Updates persistent worker heartbeat in database."""
     now_utc = datetime.now(timezone.utc)
@@ -244,6 +264,9 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
         start_step = getattr(job, 'current_step', 1) or 1
 
         for idx in range(start_step, count + 1):
+            # Job-level lease renewal to ensure long-running sequences never expire mid-flight
+            renew_job_lease(db, job.id, worker_id, additional_seconds=120)
+
             m = selected_msgs[idx - 1]
             if idx == 1:
                 delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
