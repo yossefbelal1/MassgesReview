@@ -15,9 +15,9 @@ if settings.ENVIRONMENT in ["development", "testing"]:
 def seed_initial_data():
     db = SessionLocal()
     try:
-        # 1. Admin User (Only created if explicitly configured or in dev/test)
-        bootstrap_admin_email = os.getenv("INITIAL_ADMIN_EMAIL", "admin@reviewflow.com" if settings.ENVIRONMENT in ["development", "testing"] else None)
-        bootstrap_admin_password = os.getenv("INITIAL_ADMIN_PASSWORD", "Admin@123456" if settings.ENVIRONMENT in ["development", "testing"] else None)
+        # 1. Admin User (Only created if explicitly configured via environment)
+        bootstrap_admin_email = os.getenv("INITIAL_ADMIN_EMAIL")
+        bootstrap_admin_password = os.getenv("INITIAL_ADMIN_PASSWORD")
 
         if bootstrap_admin_email and bootstrap_admin_password:
             admin_user = db.query(User).filter(User.email == bootstrap_admin_email).first()

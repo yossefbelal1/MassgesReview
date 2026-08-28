@@ -22,11 +22,6 @@ export default function Login({ onSwitchToRegister }) {
     }
   };
 
-  const handleQuickAdmin = () => {
-    setEmail('admin@reviewflow.com');
-    setPassword('Admin@123456');
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 relative overflow-hidden" dir="rtl">
       {/* Background glow */}
@@ -91,23 +86,13 @@ export default function Login({ onSwitchToRegister }) {
           </button>
         </form>
 
-        {/* Demo Quick Admin Button */}
-        <div className="mt-6 pt-5 border-t border-slate-800 flex items-center justify-between text-xs">
-          <button
-            type="button"
-            onClick={handleQuickAdmin}
-            className="text-purple-400 hover:text-purple-300 font-semibold flex items-center gap-1.5"
-          >
-            <Shield className="w-3.5 h-3.5" />
-            <span>دخول كمدير المنصة (Root Admin)</span>
-          </button>
-
+        <div className="mt-6 pt-5 border-t border-slate-800 flex items-center justify-center text-xs">
           <button
             type="button"
             onClick={onSwitchToRegister}
             className="text-emerald-400 hover:text-emerald-300 font-semibold"
           >
-            إنشاء حساب جديد
+            ليس لديك حساب؟ إنشاء حساب جديد
           </button>
         </div>
       </div>
