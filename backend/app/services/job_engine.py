@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import time
 import random
 import asyncio
@@ -20,6 +21,35 @@ from backend.app.models.models import (
 
 BANK_ID = int(settings.DEFAULT_REVIEW_BANK_ID) if settings.DEFAULT_REVIEW_BANK_ID.lstrip("-").isdigit() else -1003969850866
 logger = logging.getLogger("reviewflow.job_engine")
+
+def matches_trigger(msg_text: str, trigger_value: str, trigger_type: str) -> bool:
+    """
+    Precision keyword matching:
+    - Strips URLs (http://, https://, t.me) so 'https://' never falsely matches keywords like 'tp', 'ht', etc.
+    - Matches whole words/tokens using boundary regex so partial substrings inside random words don't cause false triggers.
+    """
+    if not msg_text or not trigger_value:
+        return False
+
+    t_val = trigger_value.strip().lower()
+    if not t_val:
+        return False
+
+    msg_lower = msg_text.strip().lower()
+
+    if trigger_type == "exact":
+        return msg_lower == t_val
+
+    if trigger_type == "prefix":
+        return msg_lower.startswith(t_val)
+
+    # 1. Remove URLs from msg_lower to eliminate false matches from links (e.g. 'https://' matching 'tp')
+    clean_text = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', ' ', msg_lower)
+
+    # 2. Whole word / phrase boundary match
+    pattern = r'(?:^|[\s\W_])' + re.escape(t_val) + r'(?:$|[\s\W_])'
+    return bool(re.search(pattern, clean_text))
+
 
 def is_valid_member_review(m) -> bool:
     """Filters bank messages to select authorized review messages and exclude channel forwards."""
@@ -62,18 +92,7 @@ def ingest_channel_messages(
             if not auto.is_active:
                 continue
 
-            t_val = auto.trigger_value.strip().lower()
-            msg_lower = msg_text.strip().lower()
-
-            is_match = False
-            if auto.trigger_type == "exact":
-                is_match = (msg_lower == t_val)
-            elif auto.trigger_type == "prefix":
-                is_match = msg_lower.startswith(t_val)
-            else:  # contains
-                is_match = (t_val in msg_lower)
-
-            if is_match:
+            if matches_trigger(msg_text, auto.trigger_value, auto.trigger_type):
                 idempotency_key = f"{channel.id}:{msg.id}:{auto.id}"
                 existing_job = db.query(Job).filter(Job.idempotency_key == idempotency_key).first()
                 if not existing_job:
