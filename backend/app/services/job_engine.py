@@ -3,6 +3,7 @@ import os
 import time
 import random
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from backend.app.models.models import (
 )
 
 BANK_ID = int(settings.DEFAULT_REVIEW_BANK_ID) if settings.DEFAULT_REVIEW_BANK_ID.lstrip("-").isdigit() else -1003969850866
+logger = logging.getLogger("reviewflow.job_engine")
 
 def is_valid_member_review(m) -> bool:
     """Strictly ensures message is an authentic member review without channel forward headers."""
@@ -273,205 +275,237 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                         consecutive_failures = 0
                     else:
                         consecutive_failures += 1
+                        logger.warning(
+                            "Lease renewal returned False for job %s worker %s (attempt %d/2)",
+                            job.id[:8], worker_id, consecutive_failures,
+                        )
                         if consecutive_failures >= 2:
+                            logger.error(
+                                "Lease renewal FAILED for job %s — worker %s lost ownership",
+                                job.id[:8], worker_id,
+                            )
                             heartbeat_failed.set()
                             break
                 finally:
                     hb_db.close()
-            except Exception:
+            except Exception as hb_err:
                 consecutive_failures += 1
+                logger.warning(
+                    "Lease renewal exception for job %s worker %s (attempt %d/2): %s",
+                    job.id[:8], worker_id, consecutive_failures, hb_err,
+                )
                 if consecutive_failures >= 2:
+                    logger.error(
+                        "Lease renewal FAILED (exception) for job %s — worker %s aborting",
+                        job.id[:8], worker_id,
+                    )
                     heartbeat_failed.set()
                     break
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
-    channel = job.channel
-    auto = job.automation
-    tenant = job.tenant
-
-    if not channel or not channel.is_connected:
-        job.status = "FAILED"
-        job.error_message = "Target channel not found or disconnected"
-        db.commit()
-        return
-
-    if not auto or not auto.is_active:
-        job.status = "FAILED"
-        job.error_message = "Automation is inactive or deleted"
-        db.commit()
-        return
-
-    sub = tenant.subscription if tenant else None
-    if sub and sub.expires_at:
-        exp_at = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
-        if sub.status not in ["active", "trial", "grace_period"] or exp_at < now_utc:
-            job.status = "FAILED"
-            job.error_message = "Subscription is expired or inactive"
-            db.commit()
-            return
-
     try:
-        bank_msgs = await client.get_messages(BANK_ID, limit=100)
-        valid_reviews = [m for m in bank_msgs if is_valid_member_review(m)]
+        channel = job.channel
+        auto = job.automation
+        tenant = job.tenant
 
-        if not valid_reviews:
+        if not channel or not channel.is_connected:
             job.status = "FAILED"
-            job.error_message = "No valid member reviews available in central bank"
+            job.error_message = "Target channel not found or disconnected"
+            job.lease_owner = None
+            job.lease_expires_at = None
             db.commit()
             return
 
-        target_count = getattr(auto, 'reviews_count', 2) or 2
-        initial_delay = float(getattr(auto, 'initial_delay_seconds', 5.0) or 5.0)
-        base_delay = float(getattr(auto, 'delay_seconds', 4.0) or 4.0)
+        if not auto or not auto.is_active:
+            job.status = "FAILED"
+            job.error_message = "Automation is inactive or deleted"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            db.commit()
+            return
 
-        count = min(target_count, len(valid_reviews))
-        selected_msgs = random.sample(valid_reviews, k=count)
-        target_chat_peer = int(channel.telegram_chat_id)
-
-        # Resume from current step if previously interrupted
-        start_step = getattr(job, 'current_step', 1) or 1
-
-        for idx in range(start_step, count + 1):
-            if heartbeat_failed.is_set():
+        sub = tenant.subscription if tenant else None
+        if sub and sub.expires_at:
+            exp_at = sub.expires_at if sub.expires_at.tzinfo else sub.expires_at.replace(tzinfo=timezone.utc)
+            if sub.status not in ["active", "trial", "grace_period"] or exp_at < now_utc:
                 job.status = "FAILED"
-                job.error_message = "Execution aborted: background lease renewal failed"
+                job.error_message = "Subscription is expired or inactive"
+                job.lease_owner = None
+                job.lease_expires_at = None
                 db.commit()
                 return
 
-            # Synchronous verification of lease ownership before executing step
-            has_lease = renew_job_lease(db, job.id, worker_id, additional_seconds=120)
-            if not has_lease:
+        try:
+            bank_msgs = await client.get_messages(BANK_ID, limit=100)
+            valid_reviews = [m for m in bank_msgs if is_valid_member_review(m)]
+
+            if not valid_reviews:
                 job.status = "FAILED"
-                job.error_message = "Execution aborted: worker lost lease ownership"
+                job.error_message = "No valid member reviews available in central bank"
+                job.lease_owner = None
+                job.lease_expires_at = None
                 db.commit()
                 return
 
-            m = selected_msgs[idx - 1]
-            fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
+            target_count = getattr(auto, 'reviews_count', 2) or 2
+            initial_delay = float(getattr(auto, 'initial_delay_seconds', 5.0) or 5.0)
+            base_delay = float(getattr(auto, 'delay_seconds', 4.0) or 4.0)
 
-            # ── Step Reconciliation (Publish-Intent Outbox Pattern) ──
-            # Check if a prior run already touched this step.
-            existing_record = db.query(PublishingHistory).filter(
-                PublishingHistory.job_id == job.id,
-                PublishingHistory.step_number == idx,
-            ).first()
+            count = min(target_count, len(valid_reviews))
+            selected_msgs = random.sample(valid_reviews, k=count)
+            target_chat_peer = int(channel.telegram_chat_id)
 
-            intent_record = None
+            # Resume from current step if previously interrupted
+            start_step = getattr(job, 'current_step', 1) or 1
 
-            if existing_record:
-                if existing_record.status == "SUCCESS":
-                    # Step fully completed in a prior run — skip
-                    job.current_step = idx + 1
+            for idx in range(start_step, count + 1):
+                if heartbeat_failed.is_set():
+                    job.status = "FAILED"
+                    job.error_message = "Execution aborted: background lease renewal failed"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
                     db.commit()
-                    continue
-                elif existing_record.status in ("PUBLISHING", "UNKNOWN", "ASSUMED_DELIVERED"):
-                    # CRASH / TIMEOUT / AMBIGUOUS OUTCOME:
-                    # A prior worker wrote the intent and entered PUBLISHING,
-                    # but the process crashed or disconnected before confirming SUCCESS.
-                    # The external side-effect is in an UNKNOWN state.
-                    # Reconcile safely: mark as UNKNOWN / ASSUMED_DELIVERED to prevent blind duplicate.
-                    existing_record.status = "UNKNOWN"
-                    existing_record.error_details = (
-                        f"Prior worker crashed after intent commit. "
-                        f"Reconciled by {worker_id} (ambiguous delivery state) — skipping to avoid duplicate."
+                    return
+
+                # Synchronous verification of lease ownership before executing step
+                has_lease = renew_job_lease(db, job.id, worker_id, additional_seconds=120)
+                if not has_lease:
+                    job.status = "FAILED"
+                    job.error_message = "Execution aborted: worker lost lease ownership"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    db.commit()
+                    return
+
+                m = selected_msgs[idx - 1]
+                fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
+
+                # ── Step Reconciliation (Publish-Intent Outbox Pattern) ──
+                # Check if a prior run already touched this step.
+                existing_record = db.query(PublishingHistory).filter(
+                    PublishingHistory.job_id == job.id,
+                    PublishingHistory.step_number == idx,
+                ).first()
+
+                intent_record = None
+
+                if existing_record:
+                    if existing_record.status == "SUCCESS":
+                        # Step fully completed in a prior run — skip
+                        job.current_step = idx + 1
+                        db.commit()
+                        continue
+                    elif existing_record.status in ("PUBLISHING", "UNKNOWN", "ASSUMED_DELIVERED"):
+                        # CRASH / TIMEOUT / AMBIGUOUS OUTCOME:
+                        # A prior worker wrote the intent and entered PUBLISHING,
+                        # but the process crashed or disconnected before confirming SUCCESS.
+                        # The external side-effect is in an UNKNOWN state.
+                        # Reconcile safely: mark as UNKNOWN / ASSUMED_DELIVERED to prevent blind duplicate.
+                        existing_record.status = "UNKNOWN"
+                        existing_record.error_details = (
+                            f"Prior worker crashed after intent commit. "
+                            f"Reconciled by {worker_id} (ambiguous delivery state) — skipping to avoid duplicate."
+                        )
+                        job.current_step = idx + 1
+                        db.commit()
+                        continue
+                    elif existing_record.status in ("FAILED",):
+                        # Prior attempt explicitly failed before Telegram side-effect — safe to retry.
+                        # Reuse existing record to satisfy unique constraint without ID churn.
+                        intent_record = existing_record
+                        intent_record.status = "PUBLISHING"
+                        intent_record.error_details = None
+                        intent_record.message_title = f"Review from {fwd_name}"
+                        intent_record.automation_name = auto.name
+                        intent_record.telegram_message_id = None
+                        db.commit()
+
+                if idx == 1:
+                    delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
+                else:
+                    delay = max(1.5, round(base_delay + random.uniform(-0.8, 1.8), 1))
+
+                await asyncio.sleep(delay)
+
+                if not intent_record:
+                    # ── PHASE 1: Write durable publish INTENT before Telegram call ──
+                    intent_record = PublishingHistory(
+                        tenant_id=tenant.id,
+                        job_id=job.id,
+                        channel_id=channel.id,
+                        message_title=f"Review from {fwd_name}",
+                        automation_name=auto.name,
+                        step_number=idx,
+                        status="PUBLISHING",       # Intent — not yet confirmed
+                        telegram_message_id=None,
                     )
+                    db.add(intent_record)
+                    db.commit()  # ← DURABLE: if we crash after this, the intent survives
+
+                try:
+                    # ── PHASE 2: Execute external side-effect (Telegram) ──
+                    res = await client.forward_messages(
+                        entity=target_chat_peer,
+                        messages=m.id,
+                        from_peer=BANK_ID
+                    )
+                    msg_id = res.id if not isinstance(res, list) else (res[0].id if res else None)
+
+                    # ── PHASE 3: Confirm delivery in DB ──
+                    intent_record.status = "SUCCESS"
+                    intent_record.telegram_message_id = str(msg_id)
                     job.current_step = idx + 1
+                    db.commit()  # ← If crash here, intent stays PUBLISHING → recovered as UNKNOWN
+
+                except FloodWaitError as flood_err:
+                    intent_record.status = "FLOOD_WAIT"
+                    intent_record.error_details = f"FloodWait of {flood_err.seconds}s"
+                    job.status = "RETRY_SCHEDULED"
+                    job.execute_at = datetime.now(timezone.utc) + timedelta(seconds=flood_err.seconds + 2)
+                    job.error_message = f"Telegram FloodWait: {flood_err.seconds}s required"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
                     db.commit()
-                    continue
-                elif existing_record.status in ("FAILED",):
-                    # Prior attempt explicitly failed before Telegram side-effect — safe to retry.
-                    # Reuse existing record to satisfy unique constraint without ID churn.
-                    intent_record = existing_record
-                    intent_record.status = "PUBLISHING"
-                    intent_record.error_details = None
-                    intent_record.message_title = f"Review from {fwd_name}"
-                    intent_record.automation_name = auto.name
-                    intent_record.telegram_message_id = None
+                    return
+
+                except (ChatWriteForbiddenError, ChannelPrivateError) as perm_err:
+                    intent_record.status = "FAILED"
+                    intent_record.error_details = str(perm_err)
+                    job.status = "FAILED"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    job.error_message = f"Telegram Permission Error: {perm_err}"
                     db.commit()
+                    return
 
-            if idx == 1:
-                delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
-            else:
-                delay = max(1.5, round(base_delay + random.uniform(-0.8, 1.8), 1))
+                except Exception as send_err:
+                    intent_record.status = "FAILED"
+                    intent_record.error_details = f"Send error: {str(send_err)}"
+                    job.status = "FAILED"
+                    job.lease_owner = None
+                    job.lease_expires_at = None
+                    job.error_message = f"Send error: {str(send_err)}"
+                    db.commit()
+                    return
 
-            await asyncio.sleep(delay)
+            job.status = "COMPLETED"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            auto.total_executions += 1
+            auto.last_executed_at = datetime.now(timezone.utc)
+            db.commit()
 
-            if not intent_record:
-                # ── PHASE 1: Write durable publish INTENT before Telegram call ──
-                intent_record = PublishingHistory(
-                    tenant_id=tenant.id,
-                    job_id=job.id,
-                    channel_id=channel.id,
-                    message_title=f"Review from {fwd_name}",
-                    automation_name=auto.name,
-                    step_number=idx,
-                    status="PUBLISHING",       # Intent — not yet confirmed
-                    telegram_message_id=None,
-                )
-                db.add(intent_record)
-                db.commit()  # ← DURABLE: if we crash after this, the intent survives
-
-            try:
-                # ── PHASE 2: Execute external side-effect (Telegram) ──
-                res = await client.forward_messages(
-                    entity=target_chat_peer,
-                    messages=m.id,
-                    from_peer=BANK_ID
-                )
-                msg_id = res.id if not isinstance(res, list) else (res[0].id if res else None)
-
-                # ── PHASE 3: Confirm delivery in DB ──
-                intent_record.status = "SUCCESS"
-                intent_record.telegram_message_id = str(msg_id)
-                job.current_step = idx + 1
-                db.commit()  # ← If crash here, intent stays PUBLISHING → recovered as ASSUMED_DELIVERED
-
-            except FloodWaitError as flood_err:
-                intent_record.status = "FLOOD_WAIT"
-                intent_record.error_details = f"FloodWait of {flood_err.seconds}s"
-                job.status = "RETRY_SCHEDULED"
-                job.execute_at = datetime.now(timezone.utc) + timedelta(seconds=flood_err.seconds + 2)
-                job.error_message = f"Telegram FloodWait: {flood_err.seconds}s required"
-                db.commit()
-                return
-
-            except (ChatWriteForbiddenError, ChannelPrivateError) as perm_err:
-                intent_record.status = "FAILED"
-                intent_record.error_details = str(perm_err)
-                job.status = "FAILED"
-                job.lease_owner = None
-                job.lease_expires_at = None
-                job.error_message = f"Telegram Permission Error: {perm_err}"
-                db.commit()
-                return
-
-            except Exception as send_err:
-                intent_record.status = "FAILED"
-                intent_record.error_details = f"Send error: {str(send_err)}"
-                job.status = "FAILED"
-                job.lease_owner = None
-                job.lease_expires_at = None
-                job.error_message = f"Send error: {str(send_err)}"
-                db.commit()
-                return
-
-        job.status = "COMPLETED"
-        job.lease_owner = None
-        job.lease_expires_at = None
-        auto.total_executions += 1
-        auto.last_executed_at = datetime.now(timezone.utc)
-        db.commit()
-
-    except Exception as general_err:
-        job.status = "FAILED"
-        job.error_message = f"Unexpected execution error: {str(general_err)}"
-        job.lease_owner = None
-        db.commit()
+        except Exception as general_err:
+            job.status = "FAILED"
+            job.error_message = f"Unexpected execution error: {str(general_err)}"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            db.commit()
     finally:
         stop_heartbeat.set()
         heartbeat_task.cancel()
-        try:
-            await heartbeat_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        # Use gather(return_exceptions=True) to silently consume CancelledError.
+        # In Python 3.10+, CancelledError is a BaseException that can propagate
+        # through finally blocks — gather with return_exceptions avoids this.
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
