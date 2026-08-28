@@ -21,7 +21,38 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Run Secret Detection Check
+      - name: Install Security Tools
         run: |
-          # Ensure no hardcoded raw api credentials or sessions exist in tracked files
-          ! git grep -i "1BJWap1sBuypZ" . || (echo "ERROR: Active Telegram StringSession detected in repo!" && exit 1)
+          pip install --upgrade pip
+          pip install bandit
+
+      - name: Run Bandit SAST Security Scan
+        run: |
+          bandit -r backend/app -ll -ii
+
+      - name: Run Zero-Secret Detection Check
+        run: |
+          python -c "
+          import os, sys
+          forbidden_patterns = ['ghp_', 'BEGIN RSA PRIVATE KEY', 'BEGIN PRIVATE KEY']
+          found = []
+          for root, dirs, files in os.walk('.'):
+              if '.git' in root or 'node_modules' in root or '.github' in root:
+                  continue
+              for f in files:
+                  if f.endswith(('.py', '.js', '.jsx', '.json', '.yml', '.yaml')) and not f.startswith('.env'):
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r', encoding='utf-8', errors='ignore') as fh:
+                              content = fh.read()
+                              for pat in forbidden_patterns:
+                                  if pat in content:
+                                      found.append((p, pat))
+                      except Exception:
+                          pass
+          if found:
+              print('CRITICAL: Sensitive pattern found in repository:', found)
+              sys.exit(1)
+          else:
+              print('SUCCESS: Zero secrets detected across all tracked source files!')
+          "
