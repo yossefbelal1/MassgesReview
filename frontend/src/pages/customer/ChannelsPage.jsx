@@ -5,7 +5,10 @@ import {
   RefreshCw, X, ArrowLeft, ArrowRight, UserCheck, Link, Sparkles, Copy 
 } from 'lucide-react';
 
+import { useAuth } from '../../context/AuthContext';
+
 export default function ChannelsPage() {
+  const { user } = useAuth();
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -105,6 +108,9 @@ export default function ChannelsPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const maxChannels = user?.subscription?.max_channels || 3;
+  const isLimitReached = channels.length >= maxChannels;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -113,14 +119,45 @@ export default function ChannelsPage() {
           <h1 className="text-xl font-bold text-white tracking-tight">قنواتي (ربط وتفعيل)</h1>
           <p className="text-xs text-slate-400 mt-1">اربط قناتك بسهولة من خلال معالج الانضمام الذكي والترقية التلقائية.</p>
         </div>
-        <button
-          onClick={openWizard}
-          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-950 transition-all flex items-center justify-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          <span>ربط قناة جديدة</span>
-        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs flex items-center gap-2">
+            <span className="text-slate-400">القنوات المربوطة:</span>
+            <strong className={`font-bold ${isLimitReached ? 'text-amber-400' : 'text-emerald-400'}`}>
+              {channels.length} / {maxChannels}
+            </strong>
+          </div>
+
+          <button
+            onClick={openWizard}
+            disabled={isLimitReached}
+            className={`px-4 py-2.5 rounded-xl text-xs font-semibold shadow-lg transition-all flex items-center justify-center gap-2 ${
+              isLimitReached
+                ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950 cursor-pointer'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isLimitReached ? 'وصلت للحد الأقصى' : 'ربط قناة جديدة'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Limit Alert Banner if reached */}
+      {isLimitReached && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-amber-300">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            <span>لقد استهلكت كامل عدد القنوات المسموح بها في باقتك الحالية (<strong>{maxChannels}</strong> قنوات). لربط قنوات إضافية يرجى الترقية للباقة الأعلى.</span>
+          </div>
+          <a
+            href="/subscription"
+            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs whitespace-nowrap"
+          >
+            ترقية الباقة الآن
+          </a>
+        </div>
+      )}
 
       {/* Status Banner */}
       <div className="bg-emerald-950/20 border border-emerald-500/20 rounded-2xl p-4 flex items-center justify-between">

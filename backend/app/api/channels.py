@@ -69,14 +69,20 @@ async def verify_and_add_channel(
 ):
     # 1. Check subscription channel limits
     tenant = current_user.tenant
-    if tenant and tenant.subscription and tenant.subscription.plan:
-        max_allowed = tenant.subscription.plan.max_channels
-        current_count = db.query(Channel).filter(Channel.tenant_id == tenant.id).count()
-        if current_count >= max_allowed:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Plan limit reached ({max_allowed} channels max). Please upgrade your plan."
-            )
+    if not tenant or not tenant.subscription or tenant.subscription.status not in ["active", "trial"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ليس لديك اشتراك نشط. يرجى تفعيل أو تجديد الاشتراك لتتمكن من ربط القنوات."
+        )
+
+    plan = tenant.subscription.plan
+    max_allowed = plan.max_channels if plan else 1
+    current_count = db.query(Channel).filter(Channel.tenant_id == tenant.id).count()
+    if current_count >= max_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"وصلت للحد الأقصى المسموح به في باقتك الحالية ({max_allowed} قناة). يرجى الترقية للباقة الأعلى لربط قنوات إضافية."
+        )
 
     # 2. Check Telegram Verification
     res = await telegram_service.verify_channel(data.telegram_chat_id)

@@ -20,3 +20,13 @@ def test_starter_plan_channel_limit_enforcement(client, db, tenant_a):
     )
     assert response.status_code == 403
     assert "أقصى" in response.json()["detail"] or "limit" in response.json()["detail"].lower()
+
+    # Attempting verify on 2nd channel must also be rejected with 403 Forbidden
+    resp_verify = client.post(
+        "/api/v1/channels/verify",
+        json={"telegram_chat_id": "https://t.me/second_channel"},
+        headers={"Authorization": f"Bearer {tenant_a['token']}"}
+    )
+    assert resp_verify.status_code == 403
+    assert "أقصى" in resp_verify.json()["detail"] or "limit" in resp_verify.json()["detail"].lower()
+

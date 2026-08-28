@@ -51,7 +51,7 @@ def seed_initial_data():
                 )
                 db.add(admin_user)
 
-        # 2. Default 3 Plans ($20, $30, $80)
+        # 2. Default 3 Plans ($20, $40, $100)
         plans_data = [
             {
                 "name": "الباقة الأساسية (Starter)",
@@ -61,27 +61,27 @@ def seed_initial_data():
                 "max_automations": 5,
                 "max_messages": 100,
                 "max_daily_executions": 300,
-                "features": ["1 قناة تيليجرام واحدة", "حتى 5 أهداف وكلمات مفتاحية", "فواصل زمنية عشوائية ذكية", "تشغيل سحابي 24/7"]
+                "features": ["ربط قناة تيليجرام واحدة (1)", "حتى 5 أهداف وكلمات مفتاحية", "فواصل زمنية عشوائية ذكية", "تشغيل سحابي 24/7"]
             },
             {
                 "name": "الباقة الاحترافية (Pro)",
                 "slug": "pro",
-                "price_monthly": 30.0,
+                "price_monthly": 40.0,
                 "max_channels": 3,
                 "max_automations": 15,
                 "max_messages": 500,
                 "max_daily_executions": 1000,
-                "features": ["3 قنوات تيليجرام", "حتى 15 هدف وكلمة مفتاحية", "فواصل زمنية عشوائية ذكية", "أولوية النشر الفوري 24/7"]
+                "features": ["ربط 3 قنوات تيليجرام", "حتى 15 هدف وكلمة مفتاحية", "خصم 33% (وفر $20 شهرياً)", "أولوية النشر الفوري 24/7"]
             },
             {
                 "name": "باقة النخبة (VIP)",
                 "slug": "vip",
-                "price_monthly": 80.0,
+                "price_monthly": 100.0,
                 "max_channels": 10,
                 "max_automations": 50,
                 "max_messages": 2000,
                 "max_daily_executions": 5000,
-                "features": ["10 قنوات تيليجرام", "حتى 50 هدف وكلمة مفتاحية", "فواصل زمنية عشوائية ذكية", "دعم فني VIP مخصص 24/7"]
+                "features": ["ربط 10 قنوات تيليجرام كاملة", "حتى 50 هدف وكلمة مفتاحية", "خصم 50% نصف السعر (وفر $100 شهرياً)", "دعم فني VIP مخصص 24/7"]
             }
         ]
 

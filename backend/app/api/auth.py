@@ -53,12 +53,12 @@ def register_customer(data: UserCreate, db: Session = Depends(get_db)):
         pro_plan = Plan(
             name="الباقة الاحترافية (Pro)",
             slug="pro",
-            price_monthly=30.0,
+            price_monthly=40.0,
             max_channels=3,
             max_automations=15,
             max_messages=500,
             max_daily_executions=1000,
-            features=["3 قنوات تيليجرام", "حتى 15 هدف وكلمة مفتاحية", "فواصل زمنية عشوائية ذكية", "أولوية النشر الفوري 24/7"]
+            features=["ربط 3 قنوات تيليجرام", "حتى 15 هدف وكلمة مفتاحية", "خصم 33% (وفر $20 شهرياً)", "أولوية النشر الفوري 24/7"]
         )
         db.add(pro_plan)
         db.flush()
