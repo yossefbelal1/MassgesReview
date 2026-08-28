@@ -18,10 +18,12 @@ class TelegramService:
     async def get_client(self) -> TelegramClient:
         if self._client is None or not self._client.is_connected():
             session = StringSession(self.session_str) if self.session_str else settings.TELEGRAM_SESSION_PATH
+            api_id = self.api_id if self.api_id != 0 else 123456
+            api_hash = self.api_hash if self.api_hash else "00000000000000000000000000000000"
             self._client = TelegramClient(
                 session,
-                self.api_id,
-                self.api_hash,
+                api_id,
+                api_hash,
                 device_model='Desktop PC',
                 system_version='Windows 10',
                 app_version='4.16.8 x64',

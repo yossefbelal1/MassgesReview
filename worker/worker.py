@@ -31,8 +31,7 @@ class ReviewFlowWorker:
         print("=" * 65)
 
         # Initialize MTProto client
-        if not telegram_service.client.is_connected():
-            await telegram_service.client.connect()
+        client = await telegram_service.get_client()
 
         while self.running:
             try:
@@ -56,7 +55,7 @@ class ReviewFlowWorker:
                 job = claim_next_job(db, worker_id=self.worker_id, lease_duration_seconds=60)
                 if job:
                     print(f"\n[⚡ Claimed Job {job.id[:8]}]: Channel {job.channel_id} | Trigger '{job.trigger_text}'")
-                    await process_claimed_job(db, telegram_service.client, job, self.worker_id)
+                    await process_claimed_job(db, client, job, self.worker_id)
                     db.close()
                     continue  # Check for next job immediately without delay
 

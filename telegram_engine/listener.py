@@ -5,12 +5,12 @@ import uuid
 import asyncio
 from datetime import datetime, timezone
 from telethon import TelegramClient
-from telethon.sessions import StringSession
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal
 from backend.app.models.models import Channel, Automation, Job
+from backend.app.services.telegram_service import telegram_service
 from backend.app.services.job_engine import (
     ingest_channel_messages,
     claim_next_job,
@@ -23,20 +23,6 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 WORKER_ID = f"listener-{uuid.uuid4().hex[:8]}"
-
-session = StringSession(settings.TELEGRAM_STRING_SESSION) if settings.TELEGRAM_STRING_SESSION else settings.TELEGRAM_SESSION_PATH
-
-client = TelegramClient(
-    session,
-    settings.TELEGRAM_API_ID,
-    settings.TELEGRAM_API_HASH,
-    device_model='Desktop PC',
-    system_version='Windows 10',
-    app_version='4.16.8 x64',
-    lang_code='ar',
-    system_lang_code='ar'
-)
-
 RUNNING = True
 CHANNEL_ENTITIES = {}
 BOT_USER_ID = None
@@ -45,11 +31,13 @@ async def active_channel_watcher():
     """Polls connected channels for new messages and durably persists triggers into DB."""
     global CHANNEL_ENTITIES, BOT_USER_ID, RUNNING
 
+    client = await telegram_service.get_client()
+
     try:
         me = await client.get_me()
         if me:
             BOT_USER_ID = me.id
-            print(f"[🤖 Telegram Identity]: Logged in as User ID {BOT_USER_ID} (@{me.username})", flush=True)
+            print(f"[🤖 Telegram Identity]: Logged in as User ID {BOT_USER_ID} (@{getattr(me, 'username', 'N/A')})", flush=True)
     except Exception as e:
         print(f"[!] Warning fetching Telegram identity: {e}", flush=True)
 
@@ -119,6 +107,7 @@ async def worker_job_executor():
     """Continuously claims and executes pending jobs with atomic locking and lease management."""
     global RUNNING
     last_recovery_time = 0
+    client = await telegram_service.get_client()
 
     while RUNNING:
         try:
@@ -153,11 +142,14 @@ async def main():
     print(f"🛰️ [ReviewFlow Telegram Engine] Initializing Worker {WORKER_ID}...", flush=True)
     print("=" * 65, flush=True)
 
-    await client.start()
-    me = await client.get_me()
-    bot_username = getattr(me, 'username', 'Unknown')
-    bot_name = getattr(me, 'first_name', 'Bot')
-    print(f"🛰️ [ReviewFlow Telegram Engine] Active as @{bot_username} ({bot_name})", flush=True)
+    client = await telegram_service.get_client()
+    try:
+        me = await client.get_me()
+        bot_username = getattr(me, 'username', 'Unknown')
+        bot_name = getattr(me, 'first_name', 'Bot')
+        print(f"🛰️ [ReviewFlow Telegram Engine] Active as @{bot_username} ({bot_name})", flush=True)
+    except Exception:
+        pass
 
     await asyncio.gather(
         active_channel_watcher(),
