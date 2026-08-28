@@ -51,14 +51,14 @@ def register_customer(data: UserCreate, db: Session = Depends(get_db)):
     pro_plan = db.query(Plan).filter(Plan.slug == "pro").first()
     if not pro_plan:
         pro_plan = Plan(
-            name="Pro Plan",
+            name="الباقة الاحترافية (Pro)",
             slug="pro",
-            price_monthly=49.0,
+            price_monthly=30.0,
             max_channels=3,
-            max_automations=30,
+            max_automations=15,
             max_messages=500,
             max_daily_executions=1000,
-            features=["3 Channels", "30 Automations", "500 Message Library", "Sequence Delays", "Priority Processing"]
+            features=["3 قنوات تيليجرام", "حتى 15 هدف وكلمة مفتاحية", "فواصل زمنية عشوائية ذكية", "أولوية النشر الفوري 24/7"]
         )
         db.add(pro_plan)
         db.flush()

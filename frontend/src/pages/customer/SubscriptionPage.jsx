@@ -44,7 +44,8 @@ export default function SubscriptionPage() {
       setLoading(true);
       const res = await apiClient.get('/admin/plans');
       if (res.data && res.data.length > 0) {
-        setPlans(res.data);
+        const sorted = [...res.data].sort((a, b) => a.price_monthly - b.price_monthly);
+        setPlans(sorted);
       }
     } catch (err) {
       console.error('Error fetching plans, using defaults:', err);
