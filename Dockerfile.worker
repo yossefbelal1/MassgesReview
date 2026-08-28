@@ -4,6 +4,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt requirements.txt
@@ -12,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ backend/
 COPY worker/ worker/
 COPY telegram_engine/ telegram_engine/
-COPY sessions/ sessions/
 
-CMD ["python", "worker/worker.py"]
+ENV PYTHONPATH=/app
+
+CMD ["python", "telegram_engine/listener.py"]

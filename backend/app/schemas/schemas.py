@@ -66,7 +66,7 @@ class SubscriptionOut(BaseModel):
 # Channel
 class ChannelBase(BaseModel):
     telegram_chat_id: str
-    title: str
+    title: Optional[str] = ""
     username: Optional[str] = None
 
 class ChannelCreate(ChannelBase):

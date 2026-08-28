@@ -27,7 +27,11 @@ def get_current_user(
     
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive or non-existent user")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inactive or non-existent user",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 def get_current_active_customer(
@@ -47,3 +51,14 @@ def get_current_admin(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin privileges required"
         )
     return current_user
+
+def get_current_tenant(
+    current_user: User = Depends(get_current_active_customer),
+    db: Session = Depends(get_db)
+) -> Tenant:
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tenant associated with user")
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant or not tenant.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant is inactive or suspended")
+    return tenant

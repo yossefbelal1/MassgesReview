@@ -1,33 +1,57 @@
 import os
+from typing import List, Union
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class Settings(BaseModel):
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     PROJECT_NAME: str = "ReviewFlow SaaS"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "reviewflow-super-secret-jwt-key-2026-secure")
+    
+    # JWT & Auth
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-reviewflow-2026-super-secure-32chars")
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24 * 7))  # 7 days
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./reviewflow.db")
     
-    # Telegram
-    TELEGRAM_API_ID: int = int(os.getenv("API_ID", 31925523))
-    TELEGRAM_API_HASH: str = os.getenv("API_HASH", "6448299ee7fb91c63cbc82511b435594")
+    # Telegram MTProto Credentials
+    TELEGRAM_API_ID: int = int(os.getenv("TELEGRAM_API_ID", os.getenv("API_ID", "0")))
+    TELEGRAM_API_HASH: str = os.getenv("TELEGRAM_API_HASH", os.getenv("API_HASH", ""))
     TELEGRAM_SESSION_PATH: str = os.getenv("SESSION_PATH", "sessions/multi_tenant_userbot")
-    TELEGRAM_STRING_SESSION: str = os.getenv(
-        "TELEGRAM_STRING_SESSION", 
-        "1BJWap1sBuypZntEY2gXJ8hZJ_zjFLJk7aNKxe9fGNB4bxM21iHnh9iNz5SaChPEr58S5SnQGd9vVwbJAN2-zmMfDPoKGoWy9RLI1MIl5_yCB3pfC747Qo4SYdR3sNPnry2errpIN9Jqv0W4oGHd0Q5g9z54AtdNsG2fYH0U2fvNzF9VrDm32L5FhbuL9aREY92gA8wFmXE-4jYR1KA3bMg2Byoylvreu7gGoKv1xDU7par5kKvb8-KT3RbryACir2R2MxpHZrQ_4CBMbBF4UL0pE0H26jIRn4QqFbWFXAXYRep0lBQ_575T2YgRSrOuUL0MWvButjTZxr2W88l5arf8jcFF3Kkk="
-    )
+    TELEGRAM_STRING_SESSION: str = os.getenv("TELEGRAM_STRING_SESSION", "")
     
-    # Redis Queue
+    # Redis Queue & Caching
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-    # Global Central Reviews Bank (Managed by SaaS Owner)
+    # Global Central Reviews Bank (Managed by SaaS Admin)
     DEFAULT_REVIEW_BANK_ID: str = os.getenv("DEFAULT_REVIEW_BANK_ID", "-1003969850866")
     DEFAULT_REVIEW_BANK_TITLE: str = "MassgesReviews Central Bank"
 
+    # CORS Allowed Origins
+    CORS_ORIGINS: List[str] = [
+        origin.strip() for origin in os.getenv(
+            "CORS_ORIGINS", 
+            "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:5173,http://127.0.0.1:3000"
+        ).split(",") if origin.strip()
+    ]
+
+    # Rate Limiting (requests per minute)
+    RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", 120))
+
+    def validate_production(self):
+        """Ensures that in production, required secrets are strictly provided and not defaulted."""
+        if self.ENVIRONMENT == "production":
+            if not self.SECRET_KEY or self.SECRET_KEY.startswith("dev-"):
+                raise ValueError("CRITICAL SECURITY ERROR: SECRET_KEY must be set to a strong unique secret in production!")
+            if not self.TELEGRAM_API_ID or not self.TELEGRAM_API_HASH:
+                raise ValueError("CRITICAL CONFIG ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH must be set in production!")
+            if not self.TELEGRAM_STRING_SESSION and not os.path.exists(self.TELEGRAM_SESSION_PATH):
+                raise ValueError("CRITICAL CONFIG ERROR: TELEGRAM_STRING_SESSION or valid session file is required in production!")
+
 settings = Settings()
+if settings.ENVIRONMENT == "production":
+    settings.validate_production()

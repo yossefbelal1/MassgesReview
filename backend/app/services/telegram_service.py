@@ -208,21 +208,48 @@ class TelegramService:
             title = getattr(entity, 'title', getattr(entity, 'first_name', 'Telegram Channel'))
             username = getattr(entity, 'username', None)
 
-            # Check Permissions
+            # Check Real Telegram Permissions
             admin_rights = getattr(entity, 'admin_rights', None)
-            is_admin = bool(getattr(entity, 'creator', False) or admin_rights or getattr(entity, 'is_admin', False))
+            is_creator = getattr(entity, 'creator', False)
+            can_post = is_creator or (admin_rights and getattr(admin_rights, 'post_messages', False)) or getattr(entity, 'is_admin', False)
+            is_admin = bool(is_creator or admin_rights or can_post)
 
             return {
                 "success": True,
                 "chat_id": chat_id,
                 "title": title,
                 "username": username,
-                "bot_is_admin": is_admin or True,
-                "can_post": True,
-                "can_forward": True
+                "bot_is_admin": is_admin,
+                "can_post": bool(can_post),
+                "can_forward": bool(can_post)
             }
         except Exception as e:
             return {"success": False, "error": f"فشل التحقق من القناة: {str(e)}"}
+
+    async def get_health_status(self) -> Dict[str, Any]:
+        """Returns real-time health metrics of the Telegram MTProto client."""
+        try:
+            client = await self.get_client()
+            connected = client.is_connected()
+            authenticated = await client.is_user_authorized() if connected else False
+            me = await client.get_me() if authenticated else None
+            return {
+                "status": "healthy" if authenticated else ("degraded" if connected else "unhealthy"),
+                "connected": connected,
+                "authenticated": authenticated,
+                "bot_id": getattr(me, "id", None),
+                "bot_username": getattr(me, "username", None),
+                "error": None
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "connected": False,
+                "authenticated": False,
+                "bot_id": None,
+                "bot_username": None,
+                "error": str(e)
+            }
 
     async def forward_message(self, source_chat_id: str, source_msg_id: int, target_chat_id: str) -> Dict[str, Any]:
         """

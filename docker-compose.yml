@@ -6,20 +6,30 @@ services:
     container_name: reviewflow_postgres
     restart: always
     environment:
-      POSTGRES_USER: reviewflow
-      POSTGRES_PASSWORD: reviewflow_password
-      POSTGRES_DB: reviewflow_db
+      POSTGRES_USER: ${POSTGRES_USER:-reviewflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+      POSTGRES_DB: ${POSTGRES_DB:-reviewflow_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    networks:
+      - reviewflow_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-reviewflow} -d ${POSTGRES_DB:-reviewflow_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     container_name: reviewflow_redis
     restart: always
-    ports:
-      - "6379:6379"
+    networks:
+      - reviewflow_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     build:
@@ -28,18 +38,26 @@ services:
     container_name: reviewflow_api
     restart: always
     environment:
-      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-reviewflow}:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/${POSTGRES_DB:-reviewflow_db}
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=reviewflow-super-secure-production-jwt-key
-      - API_ID=31925523
-      - API_HASH=6448299ee7fb91c63cbc82511b435594
+      - SECRET_KEY=${SECRET_KEY}
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_STRING_SESSION=${TELEGRAM_STRING_SESSION}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "8000:8000"
     volumes:
       - ./sessions:/app/sessions
+    networks:
+      - reviewflow_internal
+      - reviewflow_public
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   worker:
     build:
@@ -48,33 +66,23 @@ services:
     container_name: reviewflow_worker
     restart: always
     environment:
-      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-reviewflow}:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/${POSTGRES_DB:-reviewflow_db}
       - REDIS_URL=redis://redis:6379/0
-      - API_ID=31925523
-      - API_HASH=6448299ee7fb91c63cbc82511b435594
+      - TELEGRAM_API_ID=${TELEGRAM_API_ID}
+      - TELEGRAM_API_HASH=${TELEGRAM_API_HASH}
+      - TELEGRAM_STRING_SESSION=${TELEGRAM_STRING_SESSION}
     volumes:
       - ./sessions:/app/sessions
+    networks:
+      - reviewflow_internal
     depends_on:
-      - postgres
-      - redis
-      - api
-
-  telegram_listener:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    command: python telegram_engine/listener.py
-    container_name: reviewflow_telegram_listener
-    restart: always
-    environment:
-      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
-      - API_ID=31925523
-      - API_HASH=6448299ee7fb91c63cbc82511b435594
-    volumes:
-      - ./sessions:/app/sessions
-    depends_on:
-      - postgres
-      - api
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
 
   frontend:
     build:
@@ -84,8 +92,16 @@ services:
     restart: always
     ports:
       - "3000:80"
+    networks:
+      - reviewflow_public
     depends_on:
       - api
 
 volumes:
   postgres_data:
+
+networks:
+  reviewflow_internal:
+    internal: true
+  reviewflow_public:
+    driver: bridge

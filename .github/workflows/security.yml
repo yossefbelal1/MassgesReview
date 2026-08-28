@@ -1,0 +1,27 @@
+name: Security & Vulnerability Scanning
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly scan
+
+jobs:
+  security-audit:
+    name: Dependency & Secret Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run Secret Detection Check
+        run: |
+          # Ensure no hardcoded raw api credentials or sessions exist in tracked files
+          ! git grep -i "1BJWap1sBuypZ" . || (echo "ERROR: Active Telegram StringSession detected in repo!" && exit 1)

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, Float, Enum, JSON
+    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, Float, Enum, JSON, Index
 )
 from sqlalchemy.orm import relationship
 from backend.app.core.database import Base
@@ -87,6 +87,10 @@ class Channel(Base):
     last_seen_message_id = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("idx_channel_tenant_chat", "tenant_id", "telegram_chat_id"),
+    )
+
     tenant = relationship("Tenant", back_populates="channels")
     automations = relationship("Automation", back_populates="channel", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="channel", cascade="all, delete-orphan")
@@ -125,6 +129,10 @@ class Automation(Base):
     last_executed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("idx_auto_tenant_channel", "tenant_id", "channel_id", "is_active"),
+    )
+
     tenant = relationship("Tenant", back_populates="automations")
     channel = relationship("Channel", back_populates="automations")
     steps = relationship("AutomationStep", back_populates="automation", cascade="all, delete-orphan", order_by="AutomationStep.step_order")
@@ -161,6 +169,11 @@ class Job(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("idx_job_tenant_status", "tenant_id", "status"),
+        Index("idx_job_status_execute", "status", "execute_at"),
+    )
+
     tenant = relationship("Tenant", back_populates="jobs")
     automation = relationship("Automation", back_populates="jobs")
     channel = relationship("Channel", back_populates="jobs")
@@ -181,6 +194,10 @@ class PublishingHistory(Base):
     error_details = Column(Text, nullable=True)
     published_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    __table_args__ = (
+        Index("idx_history_tenant_published", "tenant_id", "published_at"),
+    )
+
     tenant = relationship("Tenant", back_populates="history")
     job = relationship("Job", back_populates="history")
 
@@ -196,3 +213,7 @@ class AuditLog(Base):
     details = Column(JSON, default=dict)
     ip_address = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_audit_tenant_created", "tenant_id", "created_at"),
+    )

@@ -4,6 +4,7 @@ import re
 import asyncio
 from datetime import datetime, timezone
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 from sqlalchemy.orm import Session
 from telethon.sessions import StringSession
 from backend.app.core.config import settings
@@ -135,6 +136,19 @@ async def run_automation_sequence(auto_id: str, channel_id: int, trigger_msg_id:
                 ))
                 db.commit()
 
+            except FloodWaitError as flood_err:
+                print(f" [⚠️ Telegram FloodWait]: Required to wait {flood_err.seconds}s. Handling backoff...")
+                db.add(PublishingHistory(
+                    tenant_id=tenant.id,
+                    channel_id=channel_obj.id,
+                    message_title=f"Review (FloodWait: {flood_err.seconds}s)",
+                    automation_name=auto.name,
+                    step_number=idx,
+                    status="FLOOD_WAIT",
+                    error_details=f"Telegram FloodWait of {flood_err.seconds}s"
+                ))
+                db.commit()
+                await asyncio.sleep(flood_err.seconds + 1)
             except Exception as fwd_err:
                 print(f" [❌ Review #{idx} Forward Error]: {fwd_err}")
                 db.add(PublishingHistory(
