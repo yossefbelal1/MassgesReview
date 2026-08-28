@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: reviewflow_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: reviewflow
+      POSTGRES_PASSWORD: reviewflow_password
+      POSTGRES_DB: reviewflow_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: reviewflow_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: reviewflow_api
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=reviewflow-super-secure-production-jwt-key
+      - API_ID=31925523
+      - API_HASH=6448299ee7fb91c63cbc82511b435594
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./sessions:/app/sessions
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: reviewflow_worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
+      - REDIS_URL=redis://redis:6379/0
+      - API_ID=31925523
+      - API_HASH=6448299ee7fb91c63cbc82511b435594
+    volumes:
+      - ./sessions:/app/sessions
+    depends_on:
+      - postgres
+      - redis
+      - api
+
+  telegram_listener:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: python telegram_engine/listener.py
+    container_name: reviewflow_telegram_listener
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://reviewflow:reviewflow_password@postgres:5432/reviewflow_db
+      - API_ID=31925523
+      - API_HASH=6448299ee7fb91c63cbc82511b435594
+    volumes:
+      - ./sessions:/app/sessions
+    depends_on:
+      - postgres
+      - api
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend
+    container_name: reviewflow_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
