@@ -102,7 +102,7 @@ def ingest_channel_messages(
 def claim_next_job(db: Session, worker_id: str, lease_duration_seconds: int = 60) -> Optional[Job]:
     """
     CONCURRENCY-SAFE ATOMIC JOB CLAIMING:
-    Uses PostgreSQL SELECT ... FOR UPDATE SKIP LOCKED or SQLite transactional row locks.
+    Uses PostgreSQL SELECT ... FOR UPDATE SKIP LOCKED or atomic conditional update.
     Guarantees two workers NEVER claim the same job concurrently.
     """
     now_utc = datetime.now(timezone.utc)
@@ -121,26 +121,49 @@ def claim_next_job(db: Session, worker_id: str, lease_duration_seconds: int = 60
         if not result:
             return None
         job_id = result[0]
-        job = db.query(Job).filter(Job.id == job_id).first()
+        
+        db.query(Job).filter(Job.id == job_id).update({
+            Job.status: "CLAIMED",
+            Job.lease_owner: worker_id,
+            Job.lease_expires_at: lease_expiration,
+            Job.attempts: Job.attempts + 1,
+            Job.updated_at: now_utc
+        }, synchronize_session="fetch")
+        db.commit()
+        return db.query(Job).filter(Job.id == job_id).first()
     else:
-        job = db.query(Job).filter(
+        # Atomic Compare-and-Swap conditional claim for SQLite / Universal SQL engines
+        candidate = db.query(Job).filter(
             or_(
                 Job.status == "PENDING",
                 and_(Job.status == "RETRY_SCHEDULED", Job.execute_at <= now_utc)
             )
         ).order_by(Job.execute_at.asc(), Job.created_at.asc()).first()
 
-    if not job:
-        return None
+        if not candidate:
+            return None
 
-    job.status = "CLAIMED"
-    job.lease_owner = worker_id
-    job.lease_expires_at = lease_expiration
-    job.attempts += 1
-    job.updated_at = now_utc
-    db.commit()
-    db.refresh(job)
-    return job
+        # Atomic conditional update: Only update if the row is STILL PENDING / RETRY_SCHEDULED
+        updated = db.query(Job).filter(
+            Job.id == candidate.id,
+            or_(
+                Job.status == "PENDING",
+                and_(Job.status == "RETRY_SCHEDULED", Job.execute_at <= now_utc)
+            )
+        ).update({
+            Job.status: "CLAIMED",
+            Job.lease_owner: worker_id,
+            Job.lease_expires_at: lease_expiration,
+            Job.attempts: Job.attempts + 1,
+            Job.updated_at: now_utc
+        }, synchronize_session="fetch")
+
+        if updated == 0:
+            db.rollback()
+            return None
+
+        db.commit()
+        return db.query(Job).filter(Job.id == candidate.id).first()
 
 def recover_expired_leases(db: Session, worker_id: str) -> int:
     """
@@ -214,12 +237,31 @@ def update_worker_heartbeat(db: Session, worker_id: str, hostname: str = "localh
 
 async def process_claimed_job(db: Session, client: TelegramClient, job: Job, worker_id: str):
     """
-    Executes a claimed job sequence with centralized Telegram FloodWait, step resumption, and error reconciliation.
+    Executes a claimed job sequence with continuous background lease renewal,
+    centralized Telegram FloodWait, step resumption, and error reconciliation.
     """
     now_utc = datetime.now(timezone.utc)
     job.status = "RUNNING"
     job.lease_expires_at = now_utc + timedelta(seconds=120)
     db.commit()
+
+    # Continuous background lease renewal task
+    stop_heartbeat = asyncio.Event()
+
+    async def _heartbeat_loop():
+        while not stop_heartbeat.is_set():
+            try:
+                await asyncio.sleep(5)
+                if stop_heartbeat.is_set():
+                    break
+                from backend.app.core.database import SessionLocal
+                hb_db = SessionLocal()
+                renew_job_lease(hb_db, job.id, worker_id, additional_seconds=120)
+                hb_db.close()
+            except Exception:
+                pass
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
     channel = job.channel
     auto = job.automation
@@ -357,3 +399,10 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
         job.error_message = f"Unexpected execution error: {str(general_err)}"
         job.lease_owner = None
         db.commit()
+    finally:
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
+        try:
+            await heartbeat_task
+        except (asyncio.CancelledError, Exception):
+            pass
