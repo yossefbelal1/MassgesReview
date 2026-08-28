@@ -36,3 +36,25 @@ def test_job_engine_functions_are_callable():
     assert callable(update_worker_heartbeat)
     assert callable(process_claimed_job)
     assert callable(is_valid_member_review)
+
+def test_clean_db_alembic_migrations_upgrade_to_head():
+    import os, tempfile, subprocess
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        env = os.environ.copy()
+        env["DATABASE_URL"] = f"sqlite:///{tmp_path}"
+        res = subprocess.run(
+            ["alembic", "-c", "backend/alembic.ini", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            env=env
+        )
+        assert res.returncode == 0, f"Alembic migration failed: {res.stderr}\n{res.stdout}"
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+

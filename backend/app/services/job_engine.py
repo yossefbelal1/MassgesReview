@@ -21,7 +21,7 @@ BANK_ID = int(settings.DEFAULT_REVIEW_BANK_ID) if settings.DEFAULT_REVIEW_BANK_I
 logger = logging.getLogger("reviewflow.job_engine")
 
 def is_valid_member_review(m) -> bool:
-    """Strictly ensures message is an authentic member review without channel forward headers."""
+    """Filters bank messages to select authorized review messages and exclude channel forwards."""
     if not getattr(m, 'fwd_from', None):
         return False
     from_id = getattr(m.fwd_from, 'from_id', None)
