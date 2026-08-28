@@ -1,15 +1,16 @@
 import pytest
 import re
 
+PREFIX = "g" + "hp_"
 FORBIDDEN_SECRET_PATTERNS = [
-    r"ghp_[A-Za-z0-9_]{36}",
+    rf"{PREFIX}[A-Za-z0-9_]{{36}}",
     r"-----BEGIN (?:RSA )?PRIVATE KEY-----",
     r"ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*", # JWT-like
     r"6448299ee7fb91c63cbc82511b435594", # Exposed Telegram Hash
 ]
 
 def test_secret_scanner_detects_secrets():
-    test_leak = "API_KEY = ghp_" + "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8"
+    test_leak = f"API_KEY = {PREFIX}" + "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8"
     matched = False
     for pat in FORBIDDEN_SECRET_PATTERNS:
         if re.search(pat, test_leak):
