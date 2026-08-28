@@ -122,3 +122,43 @@ async def test_telegram_publishing_step_resumption_after_crash(db, tenant_a):
     # Verify 2 history records total
     histories = db.query(PublishingHistory).filter(PublishingHistory.job_id == job.id).all()
     assert len(histories) == 2
+
+@pytest.mark.asyncio
+async def test_telegram_publishing_step_reconciliation_when_step_pointer_lagged(db, tenant_a):
+    channel = Channel(tenant_id=tenant_a["tenant"].id, telegram_chat_id="-10011223377", title="Lag Pointer Channel", is_connected=True)
+    db.add(channel)
+    db.flush()
+
+    auto = Automation(tenant_id=tenant_a["tenant"].id, channel_id=channel.id, name="Lag Auto", trigger_value="TP", is_active=True, reviews_count=2, initial_delay_seconds=0.01, delay_seconds=0.01)
+    db.add(auto)
+    db.flush()
+
+    # Job crashed right after Step 1 history was written but BEFORE job.current_step was updated (current_step is still 1)
+    job = Job(tenant_id=tenant_a["tenant"].id, automation_id=auto.id, channel_id=channel.id, idempotency_key="lag_job_1", trigger_text="TP", status="CLAIMED", current_step=1, total_steps=2)
+    db.add(job)
+    db.flush()
+
+    # Record Step 1 already written in publishing history
+    db.add(PublishingHistory(
+        tenant_id=tenant_a["tenant"].id,
+        job_id=job.id,
+        channel_id=channel.id,
+        message_title="Review from Trader Alice",
+        automation_name=auto.name,
+        step_number=1,
+        status="SUCCESS",
+        telegram_message_id="5001"
+    ))
+    db.commit()
+
+    mock_client = MockTelethonClient()
+    await process_claimed_job(db, mock_client, job, worker_id="recovery_worker")
+    db.refresh(job)
+
+    assert job.status == "COMPLETED"
+    # Even though job.current_step was 1, the step reconciliation found Step 1 in history and only forwarded Step 2 (1 message total)!
+    assert len(mock_client.forwarded_messages) == 1
+
+    # Verify 2 history records total
+    histories = db.query(PublishingHistory).filter(PublishingHistory.job_id == job.id).all()
+    assert len(histories) == 2

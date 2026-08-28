@@ -271,6 +271,17 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
             # Job-level lease renewal to ensure long-running sequences never expire mid-flight
             renew_job_lease(db, job.id, worker_id, additional_seconds=120)
 
+            # Reconcile: verify if this step was already completed in a prior interrupted run
+            already_published = db.query(PublishingHistory).filter(
+                PublishingHistory.job_id == job.id,
+                PublishingHistory.step_number == idx,
+                PublishingHistory.status == "SUCCESS"
+            ).first()
+            if already_published:
+                job.current_step = idx + 1
+                db.commit()
+                continue
+
             m = selected_msgs[idx - 1]
             if idx == 1:
                 delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
