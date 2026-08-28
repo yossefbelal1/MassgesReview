@@ -47,7 +47,7 @@ services:
       - TELEGRAM_STRING_SESSION=${TELEGRAM_STRING_SESSION}
       - CORS_ORIGINS=${CORS_ORIGINS}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8002:8000"
     volumes:
       - ./sessions:/app/sessions
     networks:
@@ -91,7 +91,7 @@ services:
     container_name: reviewflow_frontend
     restart: always
     ports:
-      - "3000:80"
+      - "127.0.0.1:3001:80"
     networks:
       - reviewflow_public
     depends_on:
