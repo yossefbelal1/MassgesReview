@@ -10,8 +10,8 @@ class Settings(BaseModel):
     PROJECT_NAME: str = "ReviewFlow SaaS"
     API_V1_STR: str = "/api/v1"
     
-    # JWT & Auth
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-reviewflow-2026-super-secure-32chars")
+    # JWT & Auth (Must be explicitly set in production)
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "" if os.getenv("ENVIRONMENT") == "production" else "dev-secret-key-reviewflow-2026-super-secure-32chars")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60 * 24 * 7))  # 7 days
     
