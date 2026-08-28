@@ -141,18 +141,34 @@ export default function SubscriptionPage() {
 
                 <button
                   disabled={isCurrent}
-                  onClick={() => alert(`للترقية إلى ${p.name}، يرجى التواصل مع إدارة المنصة.`)}
+                  onClick={() => window.open(`https://t.me/tamerads1?text=${encodeURIComponent(`مرحباً، أود ترقية اشتراكي إلى ${p.name} في منصة ReviewFlow`)}`, '_blank')}
                   className={`w-full py-2.5 rounded-xl text-xs font-semibold transition-all ${
                     isCurrent
                       ? 'bg-slate-800 text-slate-400 border border-slate-700 cursor-default'
-                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950 cursor-pointer'
                   }`}
                 >
-                  {isCurrent ? 'الخطة المفعلة حالياً' : `ترقية إلى ${p.name}`}
+                  {isCurrent ? 'الخطة المفعلة حالياً' : `ترقية إلى ${p.name} (تواصل عبر تيليجرام)`}
                 </button>
               </div>
             );
           })}
+        </div>
+
+        {/* Support & Direct Activation Notice */}
+        <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 text-center text-xs text-slate-400">
+          <p className="text-slate-300 font-semibold mb-1">💳 لتفعيل الاشتراكات وطرق الدفع المتاحة (USDT / التحويل البنكي):</p>
+          <p>
+            تواصل مباشرة مع إدارة المنصة عبر تيليجرام:{' '}
+            <a
+              href="https://t.me/tamerads1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-400 font-bold hover:underline inline-flex items-center gap-1"
+            >
+              @tamerads1
+            </a>
+          </p>
         </div>
       </div>
     </div>
