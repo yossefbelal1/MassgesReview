@@ -198,3 +198,13 @@ class CustomerStats(BaseModel):
     published_today: int
     failed_today: int
     upcoming_jobs: List[JobOut] = []
+
+class SubscriptionUpdateAdmin(BaseModel):
+    plan_slug: Optional[str] = None
+    status: Optional[str] = None
+    days_to_add: Optional[int] = None
+    expires_at: Optional[datetime] = None
+
+class AdminResetPassword(BaseModel):
+    new_password: str
+

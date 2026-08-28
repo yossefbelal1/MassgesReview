@@ -40,10 +40,7 @@ function MainApp() {
     return <Login onSwitchToRegister={() => setAuthMode('register')} />;
   }
 
-  // Adjust default tab for admin
-  const effectiveTab = (user.role === 'admin' && currentTab === 'dashboard') 
-    ? 'admin_dashboard' 
-    : currentTab;
+  const effectiveTab = currentTab;
 
   const getPageTitle = () => {
     switch (effectiveTab) {

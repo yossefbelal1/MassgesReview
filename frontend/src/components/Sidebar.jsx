@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   LayoutDashboard, 
   Radio, 
@@ -10,13 +10,22 @@ import {
   Activity, 
   Sliders, 
   LogOut,
-  Zap
+  Zap,
+  Shield,
+  UserCheck,
+  Sparkles,
+  ArrowLeftRight
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Sidebar({ currentTab, setCurrentTab }) {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
+
+  // For Admin: allow toggling between 'admin' and 'customer' views
+  const [adminViewMode, setAdminViewMode] = useState(() => {
+    return currentTab.startsWith('admin_') ? 'admin' : 'customer';
+  });
 
   const customerNav = [
     { id: 'dashboard', name: 'الرئيسية (الإحصائيات)', icon: LayoutDashboard },
@@ -33,12 +42,21 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
     { id: 'admin_health', name: 'حالة السيرفر والعمال', icon: Activity },
   ];
 
-  const navItems = isAdmin ? adminNav : customerNav;
+  const handleSwitchMode = (mode) => {
+    setAdminViewMode(mode);
+    if (mode === 'admin') {
+      setCurrentTab('admin_customers');
+    } else {
+      setCurrentTab('channels');
+    }
+  };
+
+  const navItems = (isAdmin && adminViewMode === 'admin') ? adminNav : customerNav;
 
   return (
-    <aside className="w-64 bg-slate-900 border-l border-slate-800 flex flex-col h-screen select-none">
+    <aside className="w-64 bg-slate-900 border-l border-slate-800 flex flex-col h-screen select-none" dir="rtl">
       {/* Brand Header */}
-      <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+      <div className="p-5 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-400 flex items-center justify-center shadow-lg shadow-emerald-950">
             <Zap className="w-5 h-5 text-white" />
@@ -52,11 +70,55 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
         </div>
       </div>
 
-      {/* Nav List */}
-      <div className="flex-1 py-6 px-4 space-y-1.5 overflow-y-auto">
-        <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          {isAdmin ? 'إدارة المنصة الشاملة' : 'لوحة تحكم العميل'}
+      {/* Admin Mode Switcher Toggle (Only for Admin accounts) */}
+      {isAdmin && (
+        <div className="p-3 mx-3 mt-3 rounded-2xl bg-slate-950/80 border border-slate-800">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1 flex items-center justify-between">
+            <span>تبديل وضع العرض</span>
+            <span className="text-emerald-400 font-mono">ADMIN</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-900 rounded-xl border border-slate-800/80">
+            <button
+              onClick={() => handleSwitchMode('admin')}
+              className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                adminViewMode === 'admin'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>الأدمن</span>
+            </button>
+
+            <button
+              onClick={() => handleSwitchMode('customer')}
+              className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                adminViewMode === 'customer'
+                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>العميل</span>
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Nav List */}
+      <div className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto">
+        <div className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+          <span>
+            {isAdmin && adminViewMode === 'admin' ? 'إدارة المنصة الشاملة' : 'لوحة تحكم قنواتي'}
+          </span>
+          {isAdmin && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-emerald-400 border border-slate-700">
+              {adminViewMode === 'admin' ? 'وضع الإدارة 👑' : 'وضع القنوات 📱'}
+            </span>
+          )}
+        </div>
+
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id;
@@ -64,13 +126,13 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
             <button
               key={item.id}
               onClick={() => setCurrentTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all duration-150 ${
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-xs transition-all duration-150 ${
                 isActive
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm font-semibold'
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm font-bold'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <Icon className={`w-5 h-5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
               <span>{item.name}</span>
             </button>
           );
