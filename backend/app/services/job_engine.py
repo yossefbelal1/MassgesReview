@@ -313,6 +313,9 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
             # Job-level lease renewal to ensure long-running sequences never expire mid-flight
             renew_job_lease(db, job.id, worker_id, additional_seconds=120)
 
+            m = selected_msgs[idx - 1]
+            fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
+
             # ── Step Reconciliation (Publish-Intent Outbox Pattern) ──
             # Check if a prior run already touched this step.
             existing_record = db.query(PublishingHistory).filter(
@@ -320,42 +323,39 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                 PublishingHistory.step_number == idx,
             ).first()
 
+            intent_record = None
+
             if existing_record:
                 if existing_record.status == "SUCCESS":
                     # Step fully completed in a prior run — skip
                     job.current_step = idx + 1
                     db.commit()
                     continue
-                elif existing_record.status == "PUBLISHING":
-                    # CRASH WINDOW HIT: A prior worker wrote the intent,
-                    # called Telegram, then crashed before updating to SUCCESS.
-                    # The Telegram message was LIKELY delivered (the intent was
-                    # committed, meaning the forward_messages call was about to
-                    # happen or already happened).  We CANNOT verify delivery
-                    # with Telegram's API, so we mark ASSUMED_DELIVERED and
-                    # advance past this step to avoid a guaranteed duplicate.
-                    existing_record.status = "ASSUMED_DELIVERED"
+                elif existing_record.status in ("PUBLISHING", "UNKNOWN", "ASSUMED_DELIVERED"):
+                    # CRASH / TIMEOUT / AMBIGUOUS OUTCOME:
+                    # A prior worker wrote the intent and entered PUBLISHING,
+                    # but the process crashed or disconnected before confirming SUCCESS.
+                    # The external side-effect is in an UNKNOWN state.
+                    # Reconcile safely: mark as UNKNOWN / ASSUMED_DELIVERED to prevent blind duplicate.
+                    existing_record.status = "UNKNOWN"
                     existing_record.error_details = (
                         f"Prior worker crashed after intent commit. "
-                        f"Reconciled by {worker_id} — skipping to avoid duplicate."
+                        f"Reconciled by {worker_id} (ambiguous delivery state) — skipping to avoid duplicate."
                     )
                     job.current_step = idx + 1
                     db.commit()
                     continue
-                elif existing_record.status == "ASSUMED_DELIVERED":
-                    # Another recovery pass already reconciled this — skip
-                    job.current_step = idx + 1
-                    db.commit()
-                    continue
                 elif existing_record.status in ("FAILED",):
-                    # Prior attempt failed before Telegram side-effect — safe to retry.
-                    # Delete the old record so we can create a fresh intent.
-                    db.delete(existing_record)
+                    # Prior attempt explicitly failed before Telegram side-effect — safe to retry.
+                    # Reuse existing record to satisfy unique constraint without ID churn.
+                    intent_record = existing_record
+                    intent_record.status = "PUBLISHING"
+                    intent_record.error_details = None
+                    intent_record.message_title = f"Review from {fwd_name}"
+                    intent_record.automation_name = auto.name
+                    intent_record.telegram_message_id = None
                     db.commit()
-                # FLOOD_WAIT records: the whole job should have been RETRY_SCHEDULED,
-                # so we shouldn't normally reach here.  If we do, treat as retriable.
 
-            m = selected_msgs[idx - 1]
             if idx == 1:
                 delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
             else:
@@ -363,21 +363,20 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
 
             await asyncio.sleep(delay)
 
-            fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
-
-            # ── PHASE 1: Write durable publish INTENT before Telegram call ──
-            intent_record = PublishingHistory(
-                tenant_id=tenant.id,
-                job_id=job.id,
-                channel_id=channel.id,
-                message_title=f"Review from {fwd_name}",
-                automation_name=auto.name,
-                step_number=idx,
-                status="PUBLISHING",       # Intent — not yet confirmed
-                telegram_message_id=None,
-            )
-            db.add(intent_record)
-            db.commit()  # ← DURABLE: if we crash after this, the intent survives
+            if not intent_record:
+                # ── PHASE 1: Write durable publish INTENT before Telegram call ──
+                intent_record = PublishingHistory(
+                    tenant_id=tenant.id,
+                    job_id=job.id,
+                    channel_id=channel.id,
+                    message_title=f"Review from {fwd_name}",
+                    automation_name=auto.name,
+                    step_number=idx,
+                    status="PUBLISHING",       # Intent — not yet confirmed
+                    telegram_message_id=None,
+                )
+                db.add(intent_record)
+                db.commit()  # ← DURABLE: if we crash after this, the intent survives
 
             try:
                 # ── PHASE 2: Execute external side-effect (Telegram) ──

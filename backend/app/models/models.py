@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, Float, Enum, JSON, Index
+    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, Float, Enum, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from backend.app.core.database import Base
@@ -200,6 +200,7 @@ class PublishingHistory(Base):
     __table_args__ = (
         Index("idx_history_tenant_published", "tenant_id", "published_at"),
         Index("idx_history_job_step", "job_id", "step_number"),
+        UniqueConstraint("job_id", "step_number", name="uq_publishing_history_job_step"),
     )
 
     tenant = relationship("Tenant", back_populates="history")
