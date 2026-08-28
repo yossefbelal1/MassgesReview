@@ -6,28 +6,36 @@ from backend.app.core.security import get_password_hash
 from backend.app.models.models import User, Plan, Tenant, Subscription
 from backend.app.api import auth, admin, channels, messages, automations, jobs, history, health
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+import os
+# Create database tables only in dev/testing; production strictly uses Alembic migrations
+if settings.ENVIRONMENT in ["development", "testing"]:
+    Base.metadata.create_all(bind=engine)
 
-# Seed default admin and plans
+# Seed default plans and optional bootstrap admin
 def seed_initial_data():
     db = SessionLocal()
     try:
-        # 1. Admin User
-        admin_user = db.query(User).filter(User.email == "admin@reviewflow.com").first()
-        if not admin_user:
-            admin_tenant = Tenant(name="ReviewFlow System", slug="system-admin")
-            db.add(admin_tenant)
-            db.flush()
+        # 1. Admin User (Only created if explicitly configured or in dev/test)
+        bootstrap_admin_email = os.getenv("INITIAL_ADMIN_EMAIL", "admin@reviewflow.com" if settings.ENVIRONMENT in ["development", "testing"] else None)
+        bootstrap_admin_password = os.getenv("INITIAL_ADMIN_PASSWORD", "Admin@123456" if settings.ENVIRONMENT in ["development", "testing"] else None)
 
-            admin_user = User(
-                tenant_id=admin_tenant.id,
-                email="admin@reviewflow.com",
-                full_name="ReviewFlow Admin",
-                hashed_password=get_password_hash("Admin@123456"),
-                role="admin"
-            )
-            db.add(admin_user)
+        if bootstrap_admin_email and bootstrap_admin_password:
+            admin_user = db.query(User).filter(User.email == bootstrap_admin_email).first()
+            if not admin_user:
+                admin_tenant = db.query(Tenant).filter(Tenant.slug == "system-admin").first()
+                if not admin_tenant:
+                    admin_tenant = Tenant(name="ReviewFlow System", slug="system-admin")
+                    db.add(admin_tenant)
+                    db.flush()
+
+                admin_user = User(
+                    tenant_id=admin_tenant.id,
+                    email=bootstrap_admin_email,
+                    full_name="ReviewFlow Admin",
+                    hashed_password=get_password_hash(bootstrap_admin_password),
+                    role="admin"
+                )
+                db.add(admin_user)
 
         # 2. Default 3 Plans ($20, $30, $80)
         plans_data = [
@@ -93,14 +101,35 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Enable CORS for frontend
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from backend.app.core.limiter import limiter
+
+# Enable CORS with explicit origin allowlist
+allow_credentials = True
+origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["http://localhost:3000"]
+if "*" in origins:
+    allow_credentials = False
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    return response
 
 # Include Routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth", tags=["Auth"])

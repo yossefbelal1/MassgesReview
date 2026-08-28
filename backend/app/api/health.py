@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import time
 import os
 import psutil
@@ -5,6 +6,7 @@ from fastapi import APIRouter, Depends, status, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from backend.app.core.database import get_db
+from backend.app.models.models import WorkerHeartbeat
 from backend.app.services.telegram_service import telegram_service
 
 router = APIRouter()
@@ -13,7 +15,7 @@ START_TIME = time.time()
 @router.get("/live")
 def liveness():
     """Liveness probe: returns 200 OK if the API process is alive."""
-    return {"status": "alive", "timestamp": time.time()}
+    return {"status": "LIVE", "timestamp": time.time()}
 
 @router.get("/ready")
 async def readiness(response: Response, db: Session = Depends(get_db)):
@@ -34,7 +36,7 @@ async def readiness(response: Response, db: Session = Depends(get_db)):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
-        "status": "ready" if is_ready else "unhealthy",
+        "status": "READY" if is_ready else "UNHEALTHY",
         "database": "connected" if db_ok else "unreachable",
         "telegram": tg_health["status"]
     }
@@ -54,15 +56,35 @@ async def full_health(response: Response, db: Session = Depends(get_db)):
 
     tg_health = await telegram_service.get_health_status()
 
+    # Check worker heartbeat
+    now_utc = datetime.now(timezone.utc)
+    latest_hb = db.query(WorkerHeartbeat).order_by(WorkerHeartbeat.last_heartbeat_at.desc()).first()
+    worker_status = "offline"
+    worker_age = None
+    if latest_hb and latest_hb.last_heartbeat_at:
+        hb_dt = latest_hb.last_heartbeat_at if latest_hb.last_heartbeat_at.tzinfo else latest_hb.last_heartbeat_at.replace(tzinfo=timezone.utc)
+        worker_age = round((now_utc - hb_dt).total_seconds(), 1)
+        if worker_age < 60:
+            worker_status = "healthy"
+        elif worker_age < 180:
+            worker_status = "degraded"
+        else:
+            worker_status = "unhealthy"
+
     process = psutil.Process(os.getpid())
     mem_info = process.memory_info()
 
-    overall_healthy = (db_status == "healthy") and (tg_health["status"] != "unhealthy")
-    if not overall_healthy:
+    overall_status = "LIVE"
+    if db_status != "healthy":
+        overall_status = "UNHEALTHY"
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    elif tg_health["status"] == "unhealthy" or worker_status in ["unhealthy", "offline"]:
+        overall_status = "DEGRADED"
+    else:
+        overall_status = "READY"
 
     return {
-        "status": "healthy" if overall_healthy else "degraded",
+        "status": overall_status,
         "uptime_seconds": round(time.time() - START_TIME, 1),
         "services": {
             "api": {
@@ -74,6 +96,11 @@ async def full_health(response: Response, db: Session = Depends(get_db)):
                 "status": "healthy" if db_status == "healthy" else "unhealthy",
                 "latency_ms": db_latency_ms,
                 "error": db_status if db_status != "healthy" else None
+            },
+            "worker": {
+                "status": worker_status,
+                "last_heartbeat_age_seconds": worker_age,
+                "worker_id": latest_hb.worker_id if latest_hb else None
             },
             "telegram_engine": tg_health
         }

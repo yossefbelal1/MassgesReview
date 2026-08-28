@@ -165,6 +165,8 @@ class Job(Base):
     status = Column(String, default="PENDING")  # PENDING, CLAIMED, RUNNING, COMPLETED, FAILED, RETRY_SCHEDULED
     execute_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     attempts = Column(Integer, default=0)
+    lease_owner = Column(String, nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -172,6 +174,7 @@ class Job(Base):
     __table_args__ = (
         Index("idx_job_tenant_status", "tenant_id", "status"),
         Index("idx_job_status_execute", "status", "execute_at"),
+        Index("idx_job_lease", "status", "lease_expires_at"),
     )
 
     tenant = relationship("Tenant", back_populates="jobs")
@@ -217,3 +220,14 @@ class AuditLog(Base):
     __table_args__ = (
         Index("idx_audit_tenant_created", "tenant_id", "created_at"),
     )
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    worker_id = Column(String, unique=True, index=True, nullable=False)
+    hostname = Column(String, nullable=True)
+    status = Column(String, default="active")  # active, stopping, dead
+    last_heartbeat_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    details = Column(JSON, default=dict)

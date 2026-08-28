@@ -167,31 +167,27 @@ async def run_automation_sequence(auto_id: str, channel_id: int, trigger_msg_id:
         db.commit()
         print(f"[✓ Sequence Finished] '{auto.name}' completed for channel '{channel_obj.title}'! Sent exactly {count} reviews.\n")
 
-    except Exception as e:
-        print(f"[❌ Sequence Error]: {e}")
-    finally:
-        db.close()
-
-PROCESSED_MESSAGES = set()
+RUNNING = True
 CHANNEL_ENTITIES = {}
 BOT_USER_ID = None
 
 async def active_channel_watcher():
-    """High-speed 1.0s active channel poller with persistent per-channel database cursor and strict filtering."""
-    global CHANNEL_ENTITIES, BOT_USER_ID, PROCESSED_MESSAGES
+    """Polls channels for new messages and ingests triggers durably into the DB."""
+    global CHANNEL_ENTITIES, BOT_USER_ID, RUNNING
 
     try:
         me = await client.get_me()
         if me:
             BOT_USER_ID = me.id
-            print(f"[🤖 Telegram Engine Self-Identity]: Logged in as User ID {BOT_USER_ID} (@{me.username})", flush=True)
-    except Exception:
-        pass
+            print(f"[🤖 Telegram Identity]: Logged in as User ID {BOT_USER_ID} (@{me.username})", flush=True)
+    except Exception as e:
+        print(f"[!] Warning fetching Telegram identity: {e}", flush=True)
 
-    while True:
+    while RUNNING:
         try:
             db: Session = SessionLocal()
             channels = db.query(Channel).filter(Channel.is_connected == True).all()
+
             for ch in channels:
                 if not ch.tenant or not ch.tenant.is_active:
                     continue
@@ -205,18 +201,16 @@ async def active_channel_watcher():
 
                 entity = CHANNEL_ENTITIES[chat_peer]
 
-                # 1. If channel cursor has never been initialized, set to latest message ID
+                # Initialize cursor if missing
                 if not ch.last_seen_message_id or ch.last_seen_message_id == 0:
                     try:
                         latest_msg = await client.get_messages(entity, limit=1)
                         ch.last_seen_message_id = latest_msg[0].id if latest_msg else 1
                         db.commit()
-                        print(f"[*] Initialized Channel '{ch.title}' ({ch.telegram_chat_id}) at Msg ID: {ch.last_seen_message_id}", flush=True)
-                    except Exception as e:
-                        print(f"[!] Init error for {ch.title}: {e}")
+                    except Exception:
+                        pass
                     continue
 
-                # 2. Query active automations belonging STRICTLY to THIS channel
                 automations = db.query(Automation).filter(
                     Automation.channel_id == ch.id,
                     Automation.is_active == True
@@ -232,131 +226,75 @@ async def active_channel_watcher():
                         pass
                     continue
 
-                # 3. Fetch ONLY new messages strictly after ch.last_seen_message_id
+                # Ingest new messages durably
                 try:
                     new_msgs = await client.get_messages(entity, min_id=ch.last_seen_message_id, limit=20)
-                    if not new_msgs:
-                        continue
-
-                    # Advance cursor in DB IMMEDIATELY to highest message ID seen
-                    max_id = max(m.id for m in new_msgs)
-                    ch.last_seen_message_id = max_id
-                    db.commit()
-
-                    now_utc = datetime.now(timezone.utc)
-
-                    # Process messages in chronological order (oldest to newest)
-                    for msg in reversed(new_msgs):
-                        dedup_key = (chat_peer, msg.id)
-                        if dedup_key in PROCESSED_MESSAGES:
-                            continue
-                        PROCESSED_MESSAGES.add(dedup_key)
-                        if len(PROCESSED_MESSAGES) > 5000:
-                            PROCESSED_MESSAGES = set(list(PROCESSED_MESSAGES)[-2500:])
-
-                        # Ignore messages sent by the bot itself
-                        if getattr(msg, 'out', False) or (BOT_USER_ID and getattr(msg, 'sender_id', None) == BOT_USER_ID):
-                            continue
-
-                        # Ignore forwarded review messages from members or channels
-                        if getattr(msg, 'fwd_from', None):
-                            continue
-
-                        # Ignore stale messages older than 180 seconds
-                        if msg.date:
-                            msg_dt = msg.date if msg.date.tzinfo else msg.date.replace(tzinfo=timezone.utc)
-                            if (now_utc - msg_dt).total_seconds() > 180:
-                                continue
-
-                        msg_text = msg.text or msg.message or ""
-                        if not msg_text.strip():
-                            continue
-
-                        # Check triggers strictly for this channel
-                        for auto in automations:
-                            if not auto.is_active:
-                                continue
-
-                            is_match = matches_trigger(auto.trigger_type, auto.trigger_value, msg_text)
-
-                            if is_match:
-                                target_count = auto.reviews_count or 2
-                                print(f"\n[🎯 Live Signal Triggered]: '{auto.trigger_value}' in Channel '{ch.title}' (Msg ID: {msg.id})! Launching {target_count} reviews...", flush=True)
-                                asyncio.create_task(
-                                    run_automation_sequence(
-                                        auto_id=auto.id,
-                                        channel_id=int(ch.telegram_chat_id),
-                                        trigger_msg_id=msg.id,
-                                        trigger_text=msg_text
-                                    )
-                                )
-                                break  # Prevent multiple automations from triggering on the same message
-                except Exception:
-                    pass
+                    if new_msgs:
+                        created = ingest_channel_messages(db, ch, new_msgs, automations)
+                        if created > 0:
+                            print(f"[📥 Durable Ingestion]: Enqueued {created} pending jobs for channel '{ch.title}'", flush=True)
+                        
+                        # Update cursor
+                        ch.last_seen_message_id = max(m.id for m in new_msgs)
+                        db.commit()
+                except Exception as ingest_err:
+                    print(f"[!] Channel '{ch.title}' ingestion error: {ingest_err}", flush=True)
 
             db.close()
-        except Exception:
-            pass
+        except Exception as loop_err:
+            print(f"[!] Active channel watcher loop error: {loop_err}", flush=True)
+
         await asyncio.sleep(1.0)
 
-async def poll_pending_jobs():
-    """Polls database for manual trigger jobs dispatched from the web dashboard."""
-    while True:
+async def worker_job_executor():
+    """Continuously claims and executes pending jobs with atomic locking and lease management."""
+    global RUNNING
+    last_recovery_time = 0
+
+    while RUNNING:
         try:
             db: Session = SessionLocal()
-            pending_jobs = db.query(Job).filter(Job.status == "PENDING").all()
-            for job in pending_jobs:
-                job.status = "RUNNING"
-                db.commit()
 
-                print(f"\n[⚡ Executing Manual Job] Automation ID: {job.automation_id} on Channel ID: {job.channel_id}...", flush=True)
-                asyncio.create_task(
-                    run_automation_sequence(
-                        auto_id=job.automation_id,
-                        channel_id=int(job.channel.telegram_chat_id) if job.channel else int(job.channel_id),
-                        trigger_msg_id=0,
-                        trigger_text="[Manual Web Trigger]"
-                    )
-                )
-                job.status = "COMPLETED"
-                db.commit()
+            # Heartbeat every 10 seconds
+            update_worker_heartbeat(db, WORKER_ID, details={"service": "telegram_engine", "status": "active"})
+
+            # Periodic lease recovery every 30 seconds
+            if time.time() - last_recovery_time > 30:
+                recovered = recover_expired_leases(db, WORKER_ID)
+                if recovered > 0:
+                    print(f"[🔄 Lease Recovery]: Recovered {recovered} orphaned jobs with expired leases.", flush=True)
+                last_recovery_time = time.time()
+
+            # Atomically claim next job
+            job = claim_next_job(db, WORKER_ID, lease_duration_seconds=60)
+            if job:
+                print(f"\n[⚡ Claimed Job {job.id[:8]}]: Channel {job.channel_id} | Trigger '{job.trigger_text}'", flush=True)
+                await process_claimed_job(db, client, job, WORKER_ID)
+                db.close()
+                continue  # Immediately check for next job
+
             db.close()
-        except Exception:
-            pass
+        except Exception as exec_err:
+            print(f"[!] Worker executor loop error: {exec_err}", flush=True)
+
         await asyncio.sleep(1.0)
 
 async def main():
-    print("[🛰️ Telegram Listener Engine] Connecting to Telegram...", flush=True)
-    await client.connect()
-    if not await client.is_user_authorized():
-        print("[❌ Error] Telethon Client session is not authorized!", flush=True)
-        return
+    print("=" * 65, flush=True)
+    print(f"🛰️ [ReviewFlow Telegram Engine] Initializing Worker {WORKER_ID}...", flush=True)
+    print("=" * 65, flush=True)
 
+    await client.start()
     me = await client.get_me()
-    print("Preloading all channel dialogs to activate realtime MTProto subscription...", flush=True)
-    dialogs = await client.get_dialogs(limit=200)
-
-    # Populate already existing message IDs to prevent firing on historical messages
-    db: Session = SessionLocal()
-    for ch in db.query(Channel).filter(Channel.is_connected == True).all():
-        try:
-            hist_msgs = await client.get_messages(int(ch.telegram_chat_id), limit=20)
-            for hm in hist_msgs:
-                PROCESSED_MESSAGES.add(f"{ch.telegram_chat_id}_{hm.id}")
-            INITIALIZED_CHANNELS.add(ch.telegram_chat_id)
-        except Exception:
-            pass
-    db.close()
-
-    print("=" * 65, flush=True)
     print(f"🛰️ [ReviewFlow Telegram Engine] Active as @{me.username} ({me.first_name})", flush=True)
-    print(f"🛰️ Subscribed to {len(dialogs)} channels | Dual-Layer Live Listener & Watcher Running 24/7!", flush=True)
-    print("=" * 65, flush=True)
 
-    # Launch background tasks concurrently
-    asyncio.create_task(poll_pending_jobs())
-    asyncio.create_task(active_channel_watcher())
-    await client.run_until_disconnected()
+    await asyncio.gather(
+        active_channel_watcher(),
+        worker_job_executor()
+    )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        print("\n[✓] ReviewFlow Telegram Engine shutdown complete.", flush=True)

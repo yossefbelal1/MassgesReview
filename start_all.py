@@ -82,9 +82,6 @@ def main():
         print("🎉 ALL REVIEWFLOW SAAS SERVICES ARE ONLINE & ACTIVE!")
         print("👉 Customer & Admin Dashboard: http://localhost:3000")
         print("👉 API Documentation (Swagger): http://localhost:8000/docs")
-        print("👉 Root Admin Credentials:")
-        print("   Email:    admin@reviewflow.com")
-        print("   Password: Admin@123456")
         print("=" * 70)
         print("\n[🛡️ Supervisor Active]: Auto-monitoring and self-healing enabled 24/7.\n")
 
