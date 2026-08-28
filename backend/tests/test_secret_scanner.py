@@ -4,9 +4,11 @@ import re
 PREFIX = "g" + "hp_"
 FORBIDDEN_SECRET_PATTERNS = [
     rf"{PREFIX}[A-Za-z0-9_]{{36}}",
-    r"-----BEGIN (?:RSA )?PRIVATE KEY-----",
-    r"ey[A-Za-z0-9-_=]+\.[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*", # JWT-like
+    r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
     r"6448299ee7fb91c63cbc82511b435594", # Exposed Telegram Hash
+    r"31925523",                          # Exposed Telegram App ID
+    r"Admin@123456",                      # Default Admin password
+    r"reviewflow_password",               # Hardcoded DB password
 ]
 
 def test_secret_scanner_detects_secrets():

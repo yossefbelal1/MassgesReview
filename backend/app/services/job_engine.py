@@ -190,7 +190,7 @@ def update_worker_heartbeat(db: Session, worker_id: str, hostname: str = "localh
 
 async def process_claimed_job(db: Session, client: TelegramClient, job: Job, worker_id: str):
     """
-    Executes a claimed job sequence with centralized Telegram FloodWait and error handling.
+    Executes a claimed job sequence with centralized Telegram FloodWait, step resumption, and error reconciliation.
     """
     now_utc = datetime.now(timezone.utc)
     job.status = "RUNNING"
@@ -240,7 +240,11 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
         selected_msgs = random.sample(valid_reviews, k=count)
         target_chat_peer = int(channel.telegram_chat_id)
 
-        for idx, m in enumerate(selected_msgs, 1):
+        # Resume from current step if previously interrupted
+        start_step = getattr(job, 'current_step', 1) or 1
+
+        for idx in range(start_step, count + 1):
+            m = selected_msgs[idx - 1]
             if idx == 1:
                 delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
             else:
@@ -257,6 +261,7 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                 msg_id = res.id if not isinstance(res, list) else (res[0].id if res else None)
                 fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
 
+                job.current_step = idx + 1
                 db.add(PublishingHistory(
                     tenant_id=tenant.id,
                     job_id=job.id,

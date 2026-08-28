@@ -36,15 +36,19 @@ jobs:
           import os, sys, re
           secret_patterns = [
               r'g' + r'hp_[A-Za-z0-9_]{36}',
-              r'-----BEGIN (?:RSA )?PRIVATE KEY-----',
-              r'6448299ee7fb91c63cbc82511b435594'
+              r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----',
+              r'6448299ee7fb91c63cbc82511b435594',
+              r'31925523',
+              r'Admin@123456',
+              r'reviewflow_password',
+              r'postgresql://[a-zA-Z0-9_-]+:[^@\${\s]+@[a-zA-Z0-9_.-]+:\d+/[a-zA-Z0-9_]+'
           ]
           found = []
           for root, dirs, files in os.walk('.'):
               if any(skip in root for skip in ['.git', 'node_modules', '.github', 'tests']):
                   continue
               for f in files:
-                  if f.endswith(('.py', '.js', '.jsx', '.json', '.yml', '.yaml')) and not f.startswith('.env'):
+                  if f.endswith(('.py', '.js', '.jsx', '.json', '.yml', '.yaml', '.md')) and not f.startswith('.env'):
                       p = os.path.join(root, f)
                       try:
                           with open(p, 'r', encoding='utf-8', errors='ignore') as fh:
