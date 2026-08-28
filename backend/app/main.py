@@ -10,6 +10,20 @@ import os
 # Create database tables only in dev/testing; production strictly uses Alembic migrations
 if settings.ENVIRONMENT in ["development", "testing"]:
     Base.metadata.create_all(bind=engine)
+    if "sqlite" in str(engine.url):
+        try:
+            with engine.connect() as conn:
+                cursor = conn.connection.cursor()
+                cursor.execute("PRAGMA table_info(jobs)")
+                cols = [row[1] for row in cursor.fetchall()]
+                if cols and "lease_owner" not in cols:
+                    cursor.execute("ALTER TABLE jobs ADD COLUMN lease_owner VARCHAR")
+                if cols and "lease_expires_at" not in cols:
+                    cursor.execute("ALTER TABLE jobs ADD COLUMN lease_expires_at DATETIME")
+                cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_publishing_history_job_step ON publishing_history(job_id, step_number)")
+                conn.connection.commit()
+        except Exception:
+            pass
 
 # Seed default plans and optional bootstrap admin
 def seed_initial_data():
