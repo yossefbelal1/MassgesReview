@@ -109,6 +109,34 @@ class FailBeforeSideEffectClient:
         raise ConnectionError("Network connection reset before transmission — no side-effect")
 
 
+class SimulatedProcessCrash(BaseException):
+    """Simulates a sudden fatal process crash (e.g. SIGKILL/SIGTERM/OOM) immediately after Telegram side-effect."""
+    pass
+
+
+class CrashAfterForwardClient:
+    """
+    Mock client that successfully sends the message to Telegram, then
+    immediately raises SimulatedProcessCrash to simulate process termination
+    BEFORE Phase 3 DB finalization can occur.
+    """
+    def __init__(self):
+        self.forwarded_count = 0
+        self.is_connected = MagicMock(return_value=True)
+
+    async def get_messages(self, entity, limit=100):
+        m1 = MagicMock(id=301, text="Great profit!", fwd_from=MagicMock(from_id=MagicMock(), from_name="Alice"))
+        m2 = MagicMock(id=302, text="Hit TP!", fwd_from=MagicMock(from_id=MagicMock(), from_name="Bob"))
+        return [m1, m2]
+
+    async def forward_messages(self, entity, messages, from_peer):
+        self.forwarded_count += 1
+        # External message delivery to Telegram succeeds:
+        # Now simulate fatal crash before Phase 3 DB commit:
+        raise SimulatedProcessCrash("Simulated SIGKILL crash after Telegram delivery")
+
+
+
 # ===================================================================
 # TEST 1 — Normal success
 # ===================================================================
@@ -228,82 +256,116 @@ async def test_2_telegram_fails_before_side_effect():
 @pytest.mark.asyncio
 async def test_3_telegram_succeeds_db_finalization_crashes():
     """
-    TEST 3: Telegram side effect succeeds, but process crashes before DB finalization.
-    Expected: durable state in DB is PUBLISHING/UNKNOWN, crash recovery reconciles without blind duplicate.
+    TEST 3: REAL CRASH BOUNDARY PROOF.
+    
+    1. Worker A claims a 2-step job and executes via process_claimed_job().
+    2. Phase 1 durably commits PublishingHistory with status="PUBLISHING" to DB.
+    3. Telegram forward_messages() succeeds.
+    4. Worker A crashes (SimulatedProcessCrash) BEFORE Phase 3 DB finalization can commit.
+    5. Worker A disappears; its lease expires.
+    6. Recovery daemon detects expired lease and resets job to PENDING.
+    7. Worker B claims the job and runs process_claimed_job().
+    8. Worker B detects the durable "PUBLISHING" record left behind by Worker A's crash,
+       safely reconciles it as UNKNOWN (ambiguous delivery state), and advances to step 2.
+    9. Worker B publishes ONLY step 2.
+    
+    Expected Invariant:
+    - Step 1 is NOT blindly re-forwarded (zero duplicate publishes).
+    - Step 2 is cleanly published with SUCCESS.
+    - Total forwards executed by Worker B is exactly 1.
     """
     sess = _make_session()
     tenant = _seed_tenant(sess)
     ch, auto = _seed_channel_auto(sess, tenant, reviews=2)
 
-    # Job simulating Worker A crashed mid-execution of Step 1
-    expired = datetime.now(timezone.utc) - timedelta(minutes=5)
     job = Job(
         tenant_id=tenant.id,
         automation_id=auto.id,
         channel_id=ch.id,
-        idempotency_key=f"t3_{time.time_ns()}",
+        idempotency_key=f"t3_real_crash_{time.time_ns()}",
         trigger_text="SIG",
-        status="RUNNING",
+        status="CLAIMED",
         current_step=1,
         total_steps=2,
-        lease_owner="worker_crashed",
-        lease_expires_at=expired,
+        lease_owner="worker_A",
+        lease_expires_at=datetime.now(timezone.utc) + timedelta(seconds=120),
     )
     sess.add(job)
-    sess.flush()
+    sess.commit()
     job_id = job.id
 
-    # Durable PUBLISHING intent was committed by Worker A before crashing
-    sess.add(PublishingHistory(
-        tenant_id=tenant.id,
-        job_id=job.id,
-        channel_id=ch.id,
-        message_title="Review from Alice",
-        automation_name=auto.name,
-        step_number=1,
-        status="PUBLISHING",
-        telegram_message_id=None,
-    ))
-    sess.commit()
+    # 1. Worker A executes process_claimed_job — Phase 1 commits PUBLISHING,
+    # Telegram forward succeeds, then SimulatedProcessCrash occurs before Phase 3 DB finalization
+    crash_client = CrashAfterForwardClient()
+    sess_a = _make_session()
+    job_a = sess_a.query(Job).filter(Job.id == job_id).first()
+    
+    try:
+        await process_claimed_job(sess_a, crash_client, job_a, worker_id="worker_A")
+    except SimulatedProcessCrash:
+        pass  # Worker A terminated abruptly due to crash
+    finally:
+        sess_a.close()  # Worker A process died
 
-    # Recovery pass: recovery daemon detects expired lease and resets to PENDING
-    recovered = recover_expired_leases(sess, worker_id="recovery_daemon")
+    # Verify that Phase 1's durable intent survived Worker A's crash in the database!
+    verify_intent = _make_session()
+    surviving_intent = verify_intent.query(PublishingHistory).filter(
+        PublishingHistory.job_id == job_id,
+        PublishingHistory.step_number == 1,
+    ).first()
+    assert surviving_intent is not None, "Durable PUBLISHING intent must exist in DB despite crash"
+    assert surviving_intent.status == "PUBLISHING", "Intent must be in durable PUBLISHING state"
+    assert surviving_intent.telegram_message_id is None
+
+    # Simulate lease expiration for dead Worker A
+    expired = datetime.now(timezone.utc) - timedelta(minutes=5)
+    verify_intent.query(Job).filter(Job.id == job_id).update({Job.lease_expires_at: expired})
+    verify_intent.commit()
+    verify_intent.close()
+
+    # 2. Recovery daemon detects expired lease and resets job to PENDING
+    rec_sess = _make_session()
+    recovered = recover_expired_leases(rec_sess, worker_id="recovery_daemon")
     assert recovered >= 1
-    sess.expire_all()
+    rec_sess.expire_all()
 
-    rec_job = sess.query(Job).filter(Job.id == job_id).first()
+    rec_job = rec_sess.query(Job).filter(Job.id == job_id).first()
     assert rec_job.status == "PENDING"
     assert rec_job.lease_owner is None
 
-    # Worker B claims and processes
+    # 3. Worker B claims the recovered job
     rec_job.status = "CLAIMED"
     rec_job.lease_owner = "worker_B"
     rec_job.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=120)
-    sess.commit()
+    rec_sess.commit()
 
+    # 4. Worker B executes process_claimed_job — reconciliation must handle Step 1
     client_b = SuccessClient()
-    await process_claimed_job(sess, client_b, rec_job, worker_id="worker_B")
-    sess.refresh(rec_job)
+    await process_claimed_job(rec_sess, client_b, rec_job, worker_id="worker_B")
+    rec_sess.refresh(rec_job)
 
     assert rec_job.status == "COMPLETED"
 
-    # Step 1 was reconciled as UNKNOWN / ambiguous delivery — NOT blindly duplicated!
-    step1_record = sess.query(PublishingHistory).filter(
+    # Invariant Verification:
+    # Step 1 was reconciled as UNKNOWN without re-forwarding
+    step1_record = rec_sess.query(PublishingHistory).filter(
         PublishingHistory.job_id == job_id,
         PublishingHistory.step_number == 1,
     ).first()
     assert step1_record.status in ("UNKNOWN", "ASSUMED_DELIVERED")
 
-    # Step 2 was cleanly forwarded
-    step2_record = sess.query(PublishingHistory).filter(
+    # Step 2 was cleanly forwarded with SUCCESS
+    step2_record = rec_sess.query(PublishingHistory).filter(
         PublishingHistory.job_id == job_id,
         PublishingHistory.step_number == 2,
     ).first()
     assert step2_record.status == "SUCCESS"
 
-    # Only step 2 was forwarded during Worker B's run
+    # Only step 2 was forwarded during Worker B's run (zero duplicate publish for step 1)
     assert client_b.forwarded_count == 1
+    rec_sess.close()
     sess.close()
+
 
 
 # ===================================================================
