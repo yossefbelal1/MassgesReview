@@ -241,14 +241,25 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
     centralized Telegram FloodWait, step resumption, and error reconciliation.
     """
     now_utc = datetime.now(timezone.utc)
+
+    # Verify worker ownership of this job before proceeding
+    if job.lease_owner and job.lease_owner != worker_id and job.status in ("RUNNING", "CLAIMED"):
+        job.status = "FAILED"
+        job.error_message = f"Execution aborted: worker {worker_id} does not own the active lease (owned by {job.lease_owner})"
+        db.commit()
+        return
+
     job.status = "RUNNING"
+    job.lease_owner = worker_id
     job.lease_expires_at = now_utc + timedelta(seconds=120)
     db.commit()
 
-    # Continuous background lease renewal task
+    # Continuous background lease renewal task with observable failure tracking
     stop_heartbeat = asyncio.Event()
+    heartbeat_failed = asyncio.Event()
 
     async def _heartbeat_loop():
+        consecutive_failures = 0
         while not stop_heartbeat.is_set():
             try:
                 await asyncio.sleep(5)
@@ -256,10 +267,22 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                     break
                 from backend.app.core.database import SessionLocal
                 hb_db = SessionLocal()
-                renew_job_lease(hb_db, job.id, worker_id, additional_seconds=120)
-                hb_db.close()
+                try:
+                    renewed = renew_job_lease(hb_db, job.id, worker_id, additional_seconds=120)
+                    if renewed:
+                        consecutive_failures = 0
+                    else:
+                        consecutive_failures += 1
+                        if consecutive_failures >= 2:
+                            heartbeat_failed.set()
+                            break
+                finally:
+                    hb_db.close()
             except Exception:
-                pass
+                consecutive_failures += 1
+                if consecutive_failures >= 2:
+                    heartbeat_failed.set()
+                    break
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
@@ -310,8 +333,19 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
         start_step = getattr(job, 'current_step', 1) or 1
 
         for idx in range(start_step, count + 1):
-            # Job-level lease renewal to ensure long-running sequences never expire mid-flight
-            renew_job_lease(db, job.id, worker_id, additional_seconds=120)
+            if heartbeat_failed.is_set():
+                job.status = "FAILED"
+                job.error_message = "Execution aborted: background lease renewal failed"
+                db.commit()
+                return
+
+            # Synchronous verification of lease ownership before executing step
+            has_lease = renew_job_lease(db, job.id, worker_id, additional_seconds=120)
+            if not has_lease:
+                job.status = "FAILED"
+                job.error_message = "Execution aborted: worker lost lease ownership"
+                db.commit()
+                return
 
             m = selected_msgs[idx - 1]
             fwd_name = getattr(m.fwd_from, 'from_name', 'Member') if m.fwd_from else 'Member'
@@ -406,6 +440,8 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                 intent_record.status = "FAILED"
                 intent_record.error_details = str(perm_err)
                 job.status = "FAILED"
+                job.lease_owner = None
+                job.lease_expires_at = None
                 job.error_message = f"Telegram Permission Error: {perm_err}"
                 db.commit()
                 return
@@ -414,6 +450,8 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                 intent_record.status = "FAILED"
                 intent_record.error_details = f"Send error: {str(send_err)}"
                 job.status = "FAILED"
+                job.lease_owner = None
+                job.lease_expires_at = None
                 job.error_message = f"Send error: {str(send_err)}"
                 db.commit()
                 return

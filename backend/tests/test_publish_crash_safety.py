@@ -508,3 +508,52 @@ async def test_6_duplicate_retry_after_recovery_no_duplicate():
     rows = sess.query(PublishingHistory).filter(PublishingHistory.job_id == job_id).all()
     assert len(rows) == 2
     sess.close()
+
+
+# ===================================================================
+# TEST 7 — Lease renewal failure halts execution (observable failure)
+# ===================================================================
+
+@pytest.mark.asyncio
+async def test_7_lease_renewal_failure_aborts_execution_safely():
+    """
+    TEST 7: Lease renewal failure handling.
+    If a worker loses its lease ownership (e.g. lease expired and recovered,
+    or stolen by another worker), the worker MUST NOT continue publishing.
+    It must observe the loss of ownership, fail the job safely, and send 0 messages.
+    """
+    sess = _make_session()
+    tenant = _seed_tenant(sess)
+    ch, auto = _seed_channel_auto(sess, tenant, reviews=1)
+
+    # Job owned by another worker (e.g. "other_worker_xyz")
+    job = Job(
+        tenant_id=tenant.id,
+        automation_id=auto.id,
+        channel_id=ch.id,
+        idempotency_key=f"t7_{time.time_ns()}",
+        trigger_text="SIG",
+        status="RUNNING",
+        current_step=1,
+        total_steps=1,
+        lease_owner="other_worker_xyz",  # Worker "imposter_worker" does NOT own this lease
+        lease_expires_at=datetime.now(timezone.utc) + timedelta(seconds=120),
+    )
+    sess.add(job)
+    sess.commit()
+    job_id = job.id
+
+    client = SuccessClient()
+    # "imposter_worker" attempts to execute a job it doesn't own
+    await process_claimed_job(sess, client, job, worker_id="imposter_worker")
+    sess.refresh(job)
+
+    # Must abort and NOT publish
+    assert job.status == "FAILED"
+    assert "lease" in (job.error_message or "").lower()
+    assert client.forwarded_count == 0
+
+    # No publishing history should be written
+    history = sess.query(PublishingHistory).filter(PublishingHistory.job_id == job_id).all()
+    assert len(history) == 0
+    sess.close()
