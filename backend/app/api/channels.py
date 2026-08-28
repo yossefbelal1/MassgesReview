@@ -17,6 +17,23 @@ def get_channels(
     channels = db.query(Channel).filter(Channel.tenant_id == current_user.tenant_id).all()
     return channels
 
+@router.get("/{channel_id}", response_model=ChannelOut)
+def get_single_channel(
+    channel_id: str,
+    current_user: User = Depends(get_current_active_customer),
+    db: Session = Depends(get_db)
+):
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == current_user.tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Channel not found"
+        )
+    return channel
+
 @router.post("/join")
 async def auto_join_channel(
     data: ChannelCreate,

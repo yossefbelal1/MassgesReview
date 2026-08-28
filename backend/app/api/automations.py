@@ -20,6 +20,20 @@ def get_automations(
     ).order_by(Automation.created_at.desc()).all()
     return automations
 
+@router.get("/{automation_id}", response_model=AutomationOut)
+def get_single_automation(
+    automation_id: str,
+    current_user: User = Depends(get_current_active_customer),
+    db: Session = Depends(get_db)
+):
+    auto = db.query(Automation).filter(
+        Automation.id == automation_id,
+        Automation.tenant_id == current_user.tenant_id
+    ).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+    return auto
+
 @router.post("/", response_model=AutomationOut)
 def create_automation(
     data: AutomationCreate,
