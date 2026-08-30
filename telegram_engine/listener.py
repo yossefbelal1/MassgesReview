@@ -141,8 +141,7 @@ async def worker_job_executor():
                     try:
                         j = task_db.query(Job).filter(Job.id == target_job_id).first()
                         if j:
-                            cl = await telegram_service.ensure_connected()
-                            await process_claimed_job(task_db, cl, j, WORKER_ID)
+                            await process_claimed_job(task_db, telegram_service, j, WORKER_ID)
                     except Exception as j_err:
                         print(f"[!] Job {target_job_id[:8]} execution error: {j_err}", flush=True)
                     finally:

@@ -4,8 +4,8 @@ import asyncio
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-API_ID = 31925523
-API_HASH = "815615774a3501a351ee2bc3595ad263"
+API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 
 async def login():
     print("=" * 60)

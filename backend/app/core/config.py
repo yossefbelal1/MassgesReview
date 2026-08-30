@@ -25,10 +25,10 @@ class Settings(BaseModel):
     TELEGRAM_STRING_SESSION: str = os.getenv("TELEGRAM_STRING_SESSION", "")
 
     # Telegram MTProto Backup / Failover Credentials (Dala)
-    TELEGRAM_BACKUP_API_ID: int = int(os.getenv("TELEGRAM_BACKUP_API_ID", "39064636"))
-    TELEGRAM_BACKUP_API_HASH: str = os.getenv("TELEGRAM_BACKUP_API_HASH", "72d90d8ac46e9293e3d5254d9645e4f9")
+    TELEGRAM_BACKUP_API_ID: int = int(os.getenv("TELEGRAM_BACKUP_API_ID", "0"))
+    TELEGRAM_BACKUP_API_HASH: str = os.getenv("TELEGRAM_BACKUP_API_HASH", "")
     TELEGRAM_BACKUP_STRING_SESSION: str = os.getenv("TELEGRAM_BACKUP_STRING_SESSION", "")
-    TELEGRAM_BACKUP_PHONE: str = os.getenv("TELEGRAM_BACKUP_PHONE", "+447727190089")
+    TELEGRAM_BACKUP_PHONE: str = os.getenv("TELEGRAM_BACKUP_PHONE", "")
     TELEGRAM_BACKUP_NAME: str = os.getenv("TELEGRAM_BACKUP_NAME", "Dala")
     
     # Redis Queue & Caching

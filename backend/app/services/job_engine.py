@@ -61,6 +61,7 @@ def matches_trigger(msg_text: str, trigger_value: str, trigger_type: str) -> boo
     - If trigger_type is 'exact': exact match after normalization.
     - If trigger_type is 'prefix': starts with after normalization.
     - If trigger_type is 'contains' (default): checks if normalized trigger keyword/phrase exists in normalized message.
+    - For short ASCII keywords (<=4 chars like 'TP', 'SL'), enforces word boundaries so 'output' doesn't falsely match 'tp'.
     """
     if not msg_text or not trigger_value:
         return False
@@ -76,6 +77,9 @@ def matches_trigger(msg_text: str, trigger_value: str, trigger_type: str) -> boo
     elif trigger_type == "prefix":
         return norm_msg.startswith(norm_trig)
     else:  # "contains" (standard default)
+        if norm_trig.isascii() and len(norm_trig) <= 4:
+            pattern = r'(?:^|[\s\W_])' + re.escape(norm_trig) + r'(?:$|[\s\W_])'
+            return bool(re.search(pattern, norm_msg))
         return norm_trig in norm_msg
 
 
@@ -525,15 +529,21 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                             continue
 
                 try:
-                    # ── PHASE 2: Execute external side-effect (Telegram with Auto-Failover) ──
-                    from backend.app.services.telegram_service import telegram_service
-                    res = await telegram_service.forward_with_failover(
-                        target_chat_peer=target_chat_peer,
-                        message_id=m.id,
-                        from_peer=BANK_ID,
-                        channel_model=channel,
-                        db=db
-                    )
+                    # ── PHASE 2: Execute external side-effect ──
+                    if hasattr(client, 'forward_with_failover'):
+                        res = await client.forward_with_failover(
+                            target_chat_peer=target_chat_peer,
+                            message_id=m.id,
+                            from_peer=BANK_ID,
+                            channel_model=channel,
+                            db=db
+                        )
+                    else:
+                        res = await client.forward_messages(
+                            entity=target_chat_peer,
+                            messages=m.id,
+                            from_peer=BANK_ID
+                        )
                     msg_id = res.id if not isinstance(res, list) else (res[0].id if res else None)
 
                     # ── PHASE 3: Confirm delivery in DB ──
