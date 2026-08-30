@@ -52,9 +52,16 @@ def matches_trigger(msg_text: str, trigger_value: str, trigger_type: str) -> boo
 
 
 def is_valid_member_review(m) -> bool:
-    """Filters bank messages to select authorized review messages and exclude channel forwards."""
+    """
+    Filters bank messages to select valid review items.
+    Supports text messages, photos, profit screenshots, videos, voice notes, and media.
+    Excludes internal bank headers and channel loops.
+    """
     if not getattr(m, 'fwd_from', None):
-        return False
+        # Also allow direct bank media/reviews if posted directly
+        has_direct_content = bool(m.text or m.media or getattr(m, 'message', None))
+        return has_direct_content
+
     from_id = getattr(m.fwd_from, 'from_id', None)
     from_name = getattr(m.fwd_from, 'from_name', None)
 
@@ -64,7 +71,8 @@ def is_valid_member_review(m) -> bool:
     if from_name and "massgesreview" in from_name.lower().replace(" ", ""):
         return False
 
-    return bool(m.text and (from_name or isinstance(from_id, types.PeerUser)))
+    has_content = bool(m.text or m.media or getattr(m, 'message', None))
+    return has_content
 
 def ingest_channel_messages(
     db: Session, 
