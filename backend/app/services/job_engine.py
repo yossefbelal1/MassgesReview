@@ -22,33 +22,61 @@ from backend.app.models.models import (
 BANK_ID = int(settings.DEFAULT_REVIEW_BANK_ID) if settings.DEFAULT_REVIEW_BANK_ID.lstrip("-").isdigit() else -1003969850866
 logger = logging.getLogger("reviewflow.job_engine")
 
+def normalize_text(text: str) -> str:
+    """
+    Robust multilingual and Arabic normalization:
+    - Lowercase and strip whitespace.
+    - Strips URLs (https://, http://, t.me, www.).
+    - Normalizes all forms of Arabic Alef (أ, إ, آ, ٱ -> ا).
+    - Normalizes Taa Marbuta (ة -> ه).
+    - Normalizes Yaa / Alef Maksura (ى, ئ -> ي).
+    - Removes Arabic Tashkeel (diacritics: Fatha, Damma, Kasra, Sukun, Tanwin, Shadda).
+    - Removes Tatweel (ـ).
+    - Collapses multiple whitespace characters to a single space.
+    """
+    if not text:
+        return ""
+    text = text.lower().strip()
+    # 1. Remove URLs
+    text = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', ' ', text)
+    # 2. Normalize Arabic Alef
+    text = re.sub(r'[إأآٱ]', 'ا', text)
+    # 3. Normalize Taa Marbuta
+    text = re.sub(r'ة', 'ه', text)
+    # 4. Normalize Yaa / Alef Maksura
+    text = re.sub(r'[ىئ]', 'ي', text)
+    # 5. Remove Tashkeel (diacritics)
+    text = re.sub(r'[\u064B-\u065F\u0670]', '', text)
+    # 6. Remove Tatweel
+    text = re.sub(r'ـ+', '', text)
+    # 7. Collapse spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
 def matches_trigger(msg_text: str, trigger_value: str, trigger_type: str) -> bool:
     """
-    Precision keyword matching:
-    - Strips URLs (http://, https://, t.me) so 'https://' never falsely matches keywords like 'tp', 'ht', etc.
-    - Matches whole words/tokens using boundary regex so partial substrings inside random words don't cause false triggers.
+    Smart, forgiving and precise trigger matching:
+    - Normalizes Arabic and Latin text for bulletproof compatibility.
+    - If trigger_type is 'exact': exact match after normalization.
+    - If trigger_type is 'prefix': starts with after normalization.
+    - If trigger_type is 'contains' (default): checks if normalized trigger keyword/phrase exists in normalized message.
     """
     if not msg_text or not trigger_value:
         return False
 
-    t_val = trigger_value.strip().lower()
-    if not t_val:
+    norm_msg = normalize_text(msg_text)
+    norm_trig = normalize_text(trigger_value)
+
+    if not norm_trig or not norm_msg:
         return False
 
-    msg_lower = msg_text.strip().lower()
-
     if trigger_type == "exact":
-        return msg_lower == t_val
-
-    if trigger_type == "prefix":
-        return msg_lower.startswith(t_val)
-
-    # 1. Remove URLs from msg_lower to eliminate false matches from links (e.g. 'https://' matching 'tp')
-    clean_text = re.sub(r'https?://\S+|www\.\S+|t\.me/\S+', ' ', msg_lower)
-
-    # 2. Whole word / phrase boundary match
-    pattern = r'(?:^|[\s\W_])' + re.escape(t_val) + r'(?:$|[\s\W_])'
-    return bool(re.search(pattern, clean_text))
+        return norm_msg == norm_trig
+    elif trigger_type == "prefix":
+        return norm_msg.startswith(norm_trig)
+    else:  # "contains" (standard default)
+        return norm_trig in norm_msg
 
 
 def is_valid_member_review(m) -> bool:

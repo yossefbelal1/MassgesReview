@@ -123,7 +123,8 @@ class AutomationStepOut(AutomationStepBase):
         from_attributes = True
 
 class AutomationBase(BaseModel):
-    channel_id: str
+    channel_id: Optional[str] = None
+    channel_ids: Optional[List[str]] = []
     name: str
     trigger_type: str = "contains"
     trigger_value: str
@@ -138,6 +139,7 @@ class AutomationCreate(AutomationBase):
 class AutomationOut(AutomationBase):
     id: str
     tenant_id: str
+    channel_id: str
     total_executions: int
     last_executed_at: Optional[datetime]
     created_at: datetime

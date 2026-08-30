@@ -40,70 +40,83 @@ def create_automation(
     current_user: User = Depends(get_current_active_customer),
     db: Session = Depends(get_db)
 ):
+    target_channel_ids = []
+    if data.channel_ids:
+        target_channel_ids = [cid for cid in data.channel_ids if cid]
+    elif data.channel_id:
+        target_channel_ids = [data.channel_id]
+
+    if not target_channel_ids:
+        raise HTTPException(status_code=400, detail="يرجى تحديد قناة واحدة على الأقل لربط الأتمتة بها.")
+
+    # Verify all channels belong to tenant
+    valid_channels = db.query(Channel).filter(
+        Channel.id.in_(target_channel_ids),
+        Channel.tenant_id == current_user.tenant_id
+    ).all()
+    if not valid_channels:
+        raise HTTPException(status_code=404, detail="القنوات المحددة غير موجودة أو لا تنتمي لحسابك.")
+
     # 1. Check plan limits
     tenant = current_user.tenant
     if tenant and tenant.subscription and tenant.subscription.plan:
         max_allowed = tenant.subscription.plan.max_automations
         current_count = db.query(Automation).filter(Automation.tenant_id == tenant.id).count()
-        if current_count >= max_allowed:
+        if current_count + len(valid_channels) > max_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Automations limit reached ({max_allowed} max). Please upgrade your plan."
+                detail=f"تجاوزت الحد الأقصى للأتمتات المسموح بها في باقتك ({max_allowed} أتمتة). يرجى الترقية لإضافة المزيد."
             )
 
-    # 2. Verify channel belongs to tenant
-    channel = db.query(Channel).filter(
-        Channel.id == data.channel_id,
-        Channel.tenant_id == current_user.tenant_id
-    ).first()
-    if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
+    created_autos = []
+    for ch in valid_channels:
+        auto = Automation(
+            tenant_id=current_user.tenant_id,
+            channel_id=ch.id,
+            name=data.name,
+            trigger_type=data.trigger_type,
+            trigger_value=data.trigger_value.strip(),
+            reviews_count=data.reviews_count,
+            initial_delay_seconds=data.initial_delay_seconds,
+            delay_seconds=data.delay_seconds,
+            is_active=data.is_active
+        )
+        db.add(auto)
+        db.flush()
 
-    # 3. Create Automation
-    auto = Automation(
-        tenant_id=current_user.tenant_id,
-        channel_id=data.channel_id,
-        name=data.name,
-        trigger_type=data.trigger_type,
-        trigger_value=data.trigger_value.strip(),
-        reviews_count=data.reviews_count,
-        initial_delay_seconds=data.initial_delay_seconds,
-        delay_seconds=data.delay_seconds,
-        is_active=data.is_active
-    )
-    db.add(auto)
-    db.flush()
+        # 4. Create Sequence Steps (if any provided)
+        if data.steps:
+            for step_data in data.steps:
+                msg = db.query(MessageLibrary).filter(
+                    MessageLibrary.id == step_data.message_id,
+                    MessageLibrary.tenant_id == current_user.tenant_id
+                ).first()
+                if not msg:
+                    continue
+                
+                step = AutomationStep(
+                    automation_id=auto.id,
+                    message_id=step_data.message_id,
+                    step_order=step_data.step_order,
+                    delay_seconds=step_data.delay_seconds
+                )
+                db.add(step)
 
-    # 4. Create Sequence Steps (if any provided)
-    if data.steps:
-        for step_data in data.steps:
-            msg = db.query(MessageLibrary).filter(
-                MessageLibrary.id == step_data.message_id,
-                MessageLibrary.tenant_id == current_user.tenant_id
-            ).first()
-            if not msg:
-                continue
-            
-            step = AutomationStep(
-                automation_id=auto.id,
-                message_id=step_data.message_id,
-                step_order=step_data.step_order,
-                delay_seconds=step_data.delay_seconds
-            )
-            db.add(step)
+        created_autos.append(auto)
 
     db.add(AuditLog(
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
         action="AUTOMATION_CREATED",
         entity_type="Automation",
-        entity_id=auto.id,
-        details={"name": auto.name, "trigger": auto.trigger_value, "reviews_count": auto.reviews_count, "initial_delay": auto.initial_delay_seconds, "delay": auto.delay_seconds}
+        entity_id=created_autos[0].id,
+        details={"name": data.name, "channels_count": len(valid_channels)}
     ))
 
     db.commit()
-    db.refresh(auto)
-    return auto
+    for a in created_autos:
+        db.refresh(a)
+    return created_autos[0]
 
 from pydantic import BaseModel
 from typing import Optional
