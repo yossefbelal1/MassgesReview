@@ -488,12 +488,14 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                             db.commit()
                             continue
 
-                try:
-                    # ── PHASE 2: Execute external side-effect (Telegram) ──
-                    res = await client.forward_messages(
-                        entity=target_chat_peer,
-                        messages=m.id,
-                        from_peer=BANK_ID
+                    # ── PHASE 2: Execute external side-effect (Telegram with Auto-Failover) ──
+                    from backend.app.services.telegram_service import telegram_service
+                    res = await telegram_service.forward_with_failover(
+                        target_chat_peer=target_chat_peer,
+                        message_id=m.id,
+                        from_peer=BANK_ID,
+                        channel_model=channel,
+                        db=db
                     )
                     msg_id = res.id if not isinstance(res, list) else (res[0].id if res else None)
 

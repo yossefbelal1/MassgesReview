@@ -77,6 +77,9 @@ class ChannelOut(ChannelBase):
     tenant_id: str
     is_connected: bool
     bot_is_admin: bool
+    backup_bot_is_admin: bool = False
+    health_status: str = "HEALTHY"
+    last_health_warning: Optional[str] = None
     can_post: bool
     can_forward: bool
     verified_at: Optional[datetime]

@@ -81,6 +81,9 @@ class Channel(Base):
     username = Column(String, nullable=True)
     is_connected = Column(Boolean, default=True)
     bot_is_admin = Column(Boolean, default=True)
+    backup_bot_is_admin = Column(Boolean, default=False)
+    health_status = Column(String, default="HEALTHY")  # HEALTHY, FAILOVER_ACTIVE, ADMIN_RIGHTS_REQUIRED, DISCONNECTED
+    last_health_warning = Column(String, nullable=True)
     can_post = Column(Boolean, default=True)
     can_forward = Column(Boolean, default=True)
     verified_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

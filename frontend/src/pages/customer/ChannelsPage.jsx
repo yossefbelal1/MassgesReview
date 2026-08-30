@@ -219,24 +219,44 @@ export default function ChannelsPage() {
 
                 <div className="grid grid-cols-2 gap-2.5 my-4">
                   <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <span className="text-[10px] uppercase text-slate-400 font-semibold block">صلاحية الأدمن</span>
+                    <span className="text-[10px] uppercase text-slate-400 font-semibold block">البوت الأساسي (@AutoMassge1)</span>
                     <span className="text-xs font-medium text-emerald-400 flex items-center mt-0.5 gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" /> مشرف نشط
                     </span>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-800/80">
-                    <span className="text-[10px] uppercase text-slate-400 font-semibold block">إذن إعادة التوجيه</span>
+                    <span className="text-[10px] uppercase text-slate-400 font-semibold block">التعافي الذاتي (Failover)</span>
                     <span className="text-xs font-medium text-emerald-400 flex items-center mt-0.5 gap-1">
-                      <ShieldCheck className="w-3.5 h-3.5" /> مسموح
+                      <ShieldCheck className="w-3.5 h-3.5" /> مفعّل 24/7
                     </span>
                   </div>
                 </div>
+
+                {/* Failover & Health Warning Banner if Admin Required */}
+                {ch.last_health_warning && (
+                  <div className={`p-3 rounded-xl mb-3 text-xs flex items-start justify-between gap-2 border ${
+                    ch.health_status === 'ADMIN_RIGHTS_REQUIRED'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                      : ch.health_status === 'FAILOVER_ACTIVE'
+                      ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+                      : 'bg-slate-950 border-slate-800 text-slate-300'
+                  }`}>
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold">{ch.last_health_warning}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">أضف الحساب (+447727190089 - Dala) كمشرف لتأمين النشر التلقائي عند الطوارئ.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
                 <span>تاريخ الربط: {new Date(ch.verified_at).toLocaleDateString('ar-EG')}</span>
-                <span className="inline-flex items-center text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ml-1.5"></span> متصلة وتعمل
+                <span className="inline-flex items-center text-emerald-400 font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ml-1.5 animate-pulse"></span>
+                  {ch.health_status === 'FAILOVER_ACTIVE' ? 'يعمل عبر الحساب الاحتياطي' : 'متصلة ومحمية 24/7'}
                 </span>
               </div>
             </div>
