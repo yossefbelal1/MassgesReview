@@ -88,7 +88,10 @@ def ingest_channel_messages(
         if not msg_text.strip():
             continue
 
-        for auto in automations:
+        # Sort automations so the most specific/longest keyword matches first
+        sorted_autos = sorted(automations, key=lambda a: (a.trigger_type == "exact", len(a.trigger_value)), reverse=True)
+
+        for auto in sorted_autos:
             if not auto.is_active:
                 continue
 
@@ -98,9 +101,6 @@ def ingest_channel_messages(
                 if not existing_job:
                     try:
                         # Use a nested transaction (SAVEPOINT) for atomic, race-safe job creation.
-                        # If another worker races to create the same idempotency_key, the unique
-                        # index will raise IntegrityError, cleanly rolling back this savepoint without
-                        # corrupting the outer database session or crashing the ingestion batch.
                         init_delay = float(getattr(auto, 'initial_delay_seconds', 5.0) or 5.0)
                         with db.begin_nested():
                             job = Job(
@@ -120,6 +120,9 @@ def ingest_channel_messages(
                             created_jobs_count += 1
                     except IntegrityError:
                         logger.info("Concurrent duplicate job insertion safely ignored for key %s", idempotency_key)
+
+                # STRICT RULE: 1 Telegram message triggers at most 1 matching automation
+                break
 
     db.commit()
 
