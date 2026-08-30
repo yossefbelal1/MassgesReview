@@ -17,6 +17,11 @@ class TelegramService:
 
     async def get_client(self) -> TelegramClient:
         if self._client is None or not self._client.is_connected():
+            if self._client is not None:
+                try:
+                    await self._client.disconnect()
+                except Exception:
+                    pass
             session = StringSession(self.session_str) if self.session_str else settings.TELEGRAM_SESSION_PATH
             api_id = self.api_id if self.api_id != 0 else 123456
             api_hash = self.api_hash if self.api_hash else "00000000000000000000000000000000"
@@ -28,10 +33,35 @@ class TelegramService:
                 system_version='Windows 10',
                 app_version='4.16.8 x64',
                 lang_code='ar',
-                system_lang_code='ar'
+                system_lang_code='ar',
+                auto_reconnect=True,
+                connection_retries=None,
+                retry_delay=1
             )
             await self._client.connect()
         return self._client
+
+    async def ensure_connected(self) -> TelegramClient:
+        """Guarantees the client is connected, reconnecting or re-initializing if needed."""
+        try:
+            if self._client is None:
+                return await self.get_client()
+            if not self._client.is_connected():
+                await self._client.connect()
+            return self._client
+        except Exception:
+            return await self.reset_client()
+
+    async def reset_client(self) -> TelegramClient:
+        """Forces a clean reset and reconnection of the Telegram client."""
+        if self._client is not None:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+        return await self.get_client()
+
 
     async def join_channel(self, channel_identifier: str) -> Dict[str, Any]:
         """

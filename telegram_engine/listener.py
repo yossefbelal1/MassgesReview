@@ -4,7 +4,7 @@ import time
 import uuid
 import asyncio
 from datetime import datetime, timezone
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
@@ -28,21 +28,16 @@ CHANNEL_ENTITIES = {}
 BOT_USER_ID = None
 
 async def active_channel_watcher():
-    """Polls connected channels for new messages and durably persists triggers into DB."""
+    """
+    Polls connected channels for new messages and durably persists triggers into DB.
+    Self-heals and auto-reconnects on any network or Telegram connection drop.
+    """
     global CHANNEL_ENTITIES, BOT_USER_ID, RUNNING
-
-    client = await telegram_service.get_client()
-
-    try:
-        me = await client.get_me()
-        if me:
-            BOT_USER_ID = me.id
-            print(f"[🤖 Telegram Identity]: Logged in as User ID {BOT_USER_ID} (@{getattr(me, 'username', 'N/A')})", flush=True)
-    except Exception as e:
-        print(f"[!] Warning fetching Telegram identity: {e}", flush=True)
 
     while RUNNING:
         try:
+            client = await telegram_service.ensure_connected()
+
             db: Session = SessionLocal()
             channels = db.query(Channel).filter(Channel.is_connected == True).all()
 
@@ -54,7 +49,9 @@ async def active_channel_watcher():
                 if chat_peer not in CHANNEL_ENTITIES:
                     try:
                         CHANNEL_ENTITIES[chat_peer] = await client.get_entity(chat_peer)
-                    except Exception:
+                    except Exception as ent_err:
+                        if "disconnected" in str(ent_err).lower():
+                            await telegram_service.ensure_connected()
                         continue
 
                 entity = CHANNEL_ENTITIES[chat_peer]
@@ -95,22 +92,31 @@ async def active_channel_watcher():
                         ch.last_seen_message_id = max(m.id for m in new_msgs)
                         db.commit()
                 except Exception as ingest_err:
+                    err_str = str(ingest_err).lower()
                     print(f"[!] Channel '{ch.title}' ingestion error: {ingest_err}", flush=True)
+                    if "disconnected" in err_str or "connection" in err_str:
+                        await telegram_service.ensure_connected()
 
             db.close()
         except Exception as loop_err:
+            err_str = str(loop_err).lower()
             print(f"[!] Active channel watcher loop error: {loop_err}", flush=True)
+            if "disconnected" in err_str or "connection" in err_str:
+                await telegram_service.ensure_connected()
 
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
 
 async def worker_job_executor():
-    """Continuously claims and executes pending jobs with atomic locking and lease management."""
+    """
+    Continuously claims and executes pending jobs with atomic locking,
+    auto-reconnecting client, and lease management.
+    """
     global RUNNING
     last_recovery_time = 0
-    client = await telegram_service.get_client()
 
     while RUNNING:
         try:
+            client = await telegram_service.ensure_connected()
             db: Session = SessionLocal()
 
             # Heartbeat every 10 seconds
@@ -133,27 +139,45 @@ async def worker_job_executor():
 
             db.close()
         except Exception as exec_err:
+            err_str = str(exec_err).lower()
             print(f"[!] Worker executor loop error: {exec_err}", flush=True)
+            if "disconnected" in err_str or "connection" in err_str:
+                await telegram_service.ensure_connected()
 
         await asyncio.sleep(1.0)
+
+async def keepalive_ping():
+    """Keeps the MTProto TCP session alive and healthy 24/7."""
+    global RUNNING
+    while RUNNING:
+        try:
+            client = await telegram_service.ensure_connected()
+            me = await client.get_me()
+            if me:
+                BOT_USER_ID = me.id
+        except Exception as e:
+            print(f"[!] Keepalive reconnecting: {e}", flush=True)
+            await telegram_service.reset_client()
+        await asyncio.sleep(60.0)
 
 async def main():
     print("=" * 65, flush=True)
     print(f"🛰️ [ReviewFlow Telegram Engine] Initializing Worker {WORKER_ID}...", flush=True)
     print("=" * 65, flush=True)
 
-    client = await telegram_service.get_client()
+    client = await telegram_service.ensure_connected()
     try:
         me = await client.get_me()
         bot_username = getattr(me, 'username', 'Unknown')
         bot_name = getattr(me, 'first_name', 'Bot')
         print(f"🛰️ [ReviewFlow Telegram Engine] Active as @{bot_username} ({bot_name})", flush=True)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[!] Warning fetching Telegram identity: {e}", flush=True)
 
     await asyncio.gather(
         active_channel_watcher(),
-        worker_job_executor()
+        worker_job_executor(),
+        keepalive_ping()
     )
 
 if __name__ == "__main__":
