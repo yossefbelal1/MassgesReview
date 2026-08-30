@@ -15,6 +15,28 @@ def slugify(text: str) -> str:
     slug = re.sub(r'[^\w\s-]', '', text.lower()).strip()
     return re.sub(r'[-\s]+', '-', slug) or "tenant"
 
+def _get_subscription_dict(tenant) -> dict | None:
+    if not tenant or not tenant.subscription:
+        return None
+    sub = tenant.subscription
+    now = datetime.now(timezone.utc)
+    exp_at = sub.expires_at
+    if exp_at.tzinfo is None:
+        exp_at = exp_at.replace(tzinfo=timezone.utc)
+    days_left = max(0, (exp_at - now).days)
+    plan = sub.plan
+    return {
+        "status": sub.status,
+        "plan_name": plan.name if plan else "الباقة الاحترافية (Pro)",
+        "plan_slug": plan.slug if plan else "pro",
+        "max_channels": plan.max_channels if plan else 1,
+        "max_automations": plan.max_automations if plan else 5,
+        "max_messages": plan.max_messages if plan else 500,
+        "max_daily_executions": plan.max_daily_executions if plan else 1000,
+        "expires_at": sub.expires_at,
+        "days_remaining": days_left
+    }
+
 @router.post("/register", response_model=Token)
 def register_customer(data: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == data.email.lower()).first()
@@ -96,7 +118,8 @@ def register_customer(data: UserCreate, db: Session = Depends(get_db)):
             "full_name": user.full_name,
             "role": user.role,
             "tenant_id": user.tenant_id,
-            "tenant_name": tenant.name
+            "tenant_name": tenant.name,
+            "subscription": _get_subscription_dict(tenant)
         }
     }
 
@@ -123,7 +146,8 @@ def login_form(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = D
             "full_name": user.full_name,
             "role": user.role,
             "tenant_id": user.tenant_id,
-            "tenant_name": tenant_name
+            "tenant_name": tenant_name,
+            "subscription": _get_subscription_dict(user.tenant)
         }
     }
 
@@ -149,30 +173,13 @@ def login_json(data: UserLogin, db: Session = Depends(get_db)):
             "full_name": user.full_name,
             "role": user.role,
             "tenant_id": user.tenant_id,
-            "tenant_name": tenant_name
+            "tenant_name": tenant_name,
+            "subscription": _get_subscription_dict(user.tenant)
         }
     }
 
 @router.get("/me")
 def get_current_user_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sub_data = None
-    if current_user.tenant and current_user.tenant.subscription:
-        sub = current_user.tenant.subscription
-        now = datetime.now(timezone.utc)
-        
-        # Ensure timezone-aware comparison
-        exp_at = sub.expires_at
-        if exp_at.tzinfo is None:
-            exp_at = exp_at.replace(tzinfo=timezone.utc)
-            
-        days_left = max(0, (exp_at - now).days)
-        sub_data = {
-            "status": sub.status,
-            "plan_name": sub.plan.name if sub.plan else "Pro",
-            "expires_at": sub.expires_at,
-            "days_remaining": days_left
-        }
-    
     return {
         "id": current_user.id,
         "email": current_user.email,
@@ -180,5 +187,5 @@ def get_current_user_profile(current_user: User = Depends(get_current_user), db:
         "role": current_user.role,
         "tenant_id": current_user.tenant_id,
         "tenant_name": current_user.tenant.name if current_user.tenant else "Admin",
-        "subscription": sub_data
+        "subscription": _get_subscription_dict(current_user.tenant)
     }

@@ -8,7 +8,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 
 export default function ChannelsPage() {
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const [channels, setChannels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -23,6 +23,9 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     fetchChannels();
+    if (refreshProfile) {
+      refreshProfile();
+    }
   }, []);
 
   useEffect(() => {
@@ -59,6 +62,9 @@ export default function ChannelsPage() {
   const closeWizard = () => {
     setModalOpen(false);
     fetchChannels();
+    if (refreshProfile) {
+      refreshProfile();
+    }
   };
 
   // Step 1: Submit Link & Auto-Join Channel
