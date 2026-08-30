@@ -3,13 +3,17 @@
   "short_name": "ReviewFlow",
   "description": "منصة أتمتة وإدارة قنوات التداول والفوركس 24/7",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait-primary",
   "background_color": "#020617",
   "theme_color": "#020617",
-  "orientation": "portrait",
+  "dir": "rtl",
+  "lang": "ar",
+  "categories": ["business", "finance", "productivity"],
   "icons": [
     {
-      "src": "https://api.iconify.design/lucide:zap.svg?color=%2310b981",
+      "src": "/icon.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"

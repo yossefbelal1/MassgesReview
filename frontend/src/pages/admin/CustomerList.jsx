@@ -36,6 +36,17 @@ export default function CustomerList() {
     fetchCustomers();
   }, []);
 
+  useEffect(() => {
+    if (selectedCustomer) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [selectedCustomer]);
+
   const fetchCustomers = async () => {
     try {
       setLoading(true);

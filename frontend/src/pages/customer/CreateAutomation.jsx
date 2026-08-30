@@ -26,7 +26,6 @@ export default function CreateAutomation({ onNavigate }) {
       const res = await apiClient.get('/channels/');
       setChannels(res.data);
       if (res.data.length > 0) {
-        // Select all channels by default for maximum convenience
         setSelectedChannelIds(res.data.map(c => c.id));
       }
     } catch (err) {
@@ -80,17 +79,22 @@ export default function CreateAutomation({ onNavigate }) {
   };
 
   if (loading) {
-    return <div className="p-12 text-center text-slate-400">جاري التحميل...</div>;
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+        <span className="text-xs sm:text-sm font-medium">جاري التحميل...</span>
+      </div>
+    );
   }
 
   if (channels.length === 0) {
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center max-w-lg mx-auto" dir="rtl">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-12 text-center max-w-lg mx-auto" dir="rtl">
         <h3 className="text-base font-bold text-white mb-2">يرجى ربط قناة تيليجرام أولاً</h3>
-        <p className="text-xs text-slate-400 mb-6">تحتاج إلى ربط قناة واحدة على الأقل قبل إنشاء كلمة مراقبة أو هدف جديد.</p>
+        <p className="text-xs text-slate-400 mb-6 leading-relaxed">تحتاج إلى ربط قناة واحدة على الأقل قبل إنشاء كلمة مراقبة أو هدف جديد.</p>
         <button
           onClick={() => onNavigate('channels')}
-          className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+          className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white text-xs font-bold transition-all min-h-[44px]"
         >
           الانتقال لصفحة قنواتي
         </button>
@@ -99,23 +103,23 @@ export default function CreateAutomation({ onNavigate }) {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto pb-12" dir="rtl">
+    <div className="space-y-4 sm:space-y-6 max-w-2xl mx-auto" dir="rtl">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">إضافة هدف / كلمة مفتاحية جديدة</h1>
-          <p className="text-xs text-slate-400 mt-1">حدد الكلمة المراقبة وخصص القنوات (قناة واحدة أو عدة قنوات معاً).</p>
+          <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">إضافة هدف / كلمة مفتاحية جديدة</h1>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">حدد الكلمة المراقبة وخصص القنوات المستهدفة.</p>
         </div>
         <button
           onClick={() => onNavigate('automations')}
-          className="text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+          className="text-xs font-bold text-slate-400 hover:text-white transition-colors px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 flex-shrink-0 min-h-[40px] flex items-center"
         >
           رجوع للقائمة
         </button>
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl">
+      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-8 space-y-4 sm:space-y-6 shadow-xl">
         {/* Basic Info */}
         <div className="space-y-4">
           <div>
@@ -127,7 +131,7 @@ export default function CreateAutomation({ onNavigate }) {
               placeholder="مثال: 🎯 الهدف الأول TP1 أو صفقة الذهب أو شاركونا"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none transition-colors"
+              className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none transition-colors min-h-[44px]"
               required
             />
           </div>
@@ -141,36 +145,36 @@ export default function CreateAutomation({ onNavigate }) {
               <button
                 type="button"
                 onClick={selectAllChannels}
-                className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold transition-colors"
+                className="text-xs text-emerald-400 hover:text-emerald-300 font-bold transition-colors py-1 px-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20"
               >
-                {selectedChannelIds.length === channels.length ? 'إلغاء تحديد الكل' : 'تحديد جميع القنوات (' + channels.length + ')'}
+                {selectedChannelIds.length === channels.length ? 'إلغاء تحديد الكل' : `تحديد جميع القنوات (${channels.length})`}
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto p-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">
               {channels.map((ch) => {
                 const isSelected = selectedChannelIds.includes(ch.id);
                 return (
                   <div
                     key={ch.id}
                     onClick={() => toggleChannel(ch.id)}
-                    className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                    className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between min-h-[48px] active:scale-[0.98] ${
                       isSelected
-                        ? 'bg-emerald-950/40 border-emerald-500/50 text-white'
+                        ? 'bg-emerald-950/40 border-emerald-500/50 text-white shadow-sm'
                         : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className={`w-4 h-4 rounded flex items-center justify-center ${isSelected ? 'text-emerald-400' : 'text-slate-600'}`}>
+                      <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 ${isSelected ? 'text-emerald-400' : 'text-slate-600'}`}>
                         {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                       </div>
-                      <div className="truncate">
+                      <div className="overflow-hidden">
                         <h4 className="text-xs font-bold truncate">{ch.title}</h4>
                         <p className="text-[10px] text-slate-400 font-mono truncate">{ch.username ? `@${ch.username}` : ch.telegram_chat_id}</p>
                       </div>
                     </div>
                     {isSelected && (
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-semibold whitespace-nowrap">
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-semibold whitespace-nowrap mr-2">
                         محددة
                       </span>
                     )}
@@ -192,22 +196,22 @@ export default function CreateAutomation({ onNavigate }) {
               placeholder="مثال: TP1 أو أرباحكم أو شاركونا أو الهدف الأول"
               value={triggerValue}
               onChange={(e) => setTriggerValue(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-emerald-400 font-mono text-sm outline-none transition-colors"
+              className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-emerald-400 font-mono text-sm outline-none transition-colors min-h-[44px]"
               required
             />
-            <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
               💡 <strong>مطابقة ذكية:</strong> يتعرف النظام تلقائياً على الهمزات والتاء المربوطة والأشكال المختلفة (أرباحكم / ارباحكم / رايكم / رأيكم) وجميع الكلمات الإنجليزية والعربية دون حساسية للحروف.
             </p>
           </div>
 
           {/* Configuration Box */}
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-4">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3.5">
             <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
               <span>إعدادات التفاعل والتوقيتات الذكية</span>
             </h4>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-white mb-1.5">
                   عدد الريفيوهات
@@ -215,7 +219,7 @@ export default function CreateAutomation({ onNavigate }) {
                 <select
                   value={reviewsCount}
                   onChange={(e) => setReviewsCount(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-emerald-400 font-bold text-xs outline-none"
+                  className="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-emerald-400 font-bold text-xs outline-none min-h-[44px]"
                 >
                   <option value="1">1 رسالة واحدة</option>
                   <option value="2">2 رسائل (الموصى به)</option>
@@ -232,11 +236,12 @@ export default function CreateAutomation({ onNavigate }) {
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="1"
                     max="600"
                     value={initialDelaySeconds}
                     onChange={(e) => setInitialDelaySeconds(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none"
+                    className="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none min-h-[44px]"
                   />
                   <span className="text-xs text-slate-400 whitespace-nowrap">ثواني</span>
                 </div>
@@ -249,11 +254,12 @@ export default function CreateAutomation({ onNavigate }) {
                 <div className="flex items-center gap-1.5">
                   <input
                     type="number"
+                    inputMode="numeric"
                     min="1"
                     max="120"
                     value={delaySeconds}
                     onChange={(e) => setDelaySeconds(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none"
+                    className="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none min-h-[44px]"
                   />
                   <span className="text-xs text-slate-400 whitespace-nowrap">ثواني</span>
                 </div>
@@ -263,20 +269,20 @@ export default function CreateAutomation({ onNavigate }) {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-800">
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2.5 pt-4 border-t border-slate-800">
           <button
             type="button"
             onClick={() => onNavigate('automations')}
-            className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+            className="w-full sm:w-auto px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors min-h-[44px]"
           >
             إلغاء
           </button>
           <button
             type="submit"
             disabled={submitting || selectedChannelIds.length === 0}
-            className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-emerald-950 transition-all flex items-center gap-2"
+            className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-98 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-emerald-950 transition-all flex items-center justify-center gap-2 min-h-[44px]"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 flex-shrink-0" />
             <span>{submitting ? 'جاري الإنشاء والربط...' : `حفظ الأتمتة (${selectedChannelIds.length} قنوات) 🚀`}</span>
           </button>
         </div>

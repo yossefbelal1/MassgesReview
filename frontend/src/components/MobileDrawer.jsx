@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { 
   X, 
   LogOut, 
@@ -13,7 +13,6 @@ import {
   Users,
   Sliders,
   Activity,
-  ExternalLink,
   ChevronLeft
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +21,17 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
   const sub = user?.subscription;
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -44,15 +54,15 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
     <div className="fixed inset-0 z-50 md:hidden flex justify-end" dir="rtl">
       {/* Backdrop */}
       <div 
-        className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" 
+        className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity animate-in fade-in duration-200" 
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Drawer Body */}
-      <div className="relative w-4/5 max-w-xs bg-slate-900 border-r border-slate-800 h-full flex flex-col justify-between shadow-2xl z-10 pt-safe pb-safe">
+      <div className="relative w-[85%] max-w-xs bg-slate-900 border-r border-slate-800 h-full flex flex-col justify-between shadow-2xl z-10 pt-safe pb-safe animate-in slide-in-from-right duration-200">
         {/* Top Header */}
-        <div>
+        <div className="overflow-y-auto flex-1">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-green-400 flex items-center justify-center shadow-md">
@@ -65,7 +75,7 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="إغلاق القائمة"
             >
               <X className="w-5 h-5" />
@@ -97,7 +107,7 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
               <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-900 rounded-lg">
                 <button
                   onClick={() => handleToggleAdminMode('admin')}
-                  className={`py-1.5 px-2 rounded text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                  className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 min-h-[40px] ${
                     adminViewMode === 'admin'
                       ? 'bg-emerald-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
@@ -108,7 +118,7 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
                 </button>
                 <button
                   onClick={() => handleToggleAdminMode('customer')}
-                  className={`py-1.5 px-2 rounded text-xs font-bold transition-all flex items-center justify-center gap-1 ${
+                  className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 min-h-[40px] ${
                     adminViewMode === 'customer'
                       ? 'bg-emerald-600 text-white shadow'
                       : 'text-slate-400 hover:text-white'
@@ -145,10 +155,10 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
                 <button
                   key={link.id}
                   onClick={() => handleSelectTab(link.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-colors ${
+                  className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-xs font-medium transition-colors min-h-[44px] ${
                     isActive
                       ? 'bg-emerald-500/10 text-emerald-400 font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50 active:scale-98'
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
@@ -169,7 +179,7 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
               onClose();
               logout();
             }}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs font-bold transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 active:scale-98 text-rose-400 text-xs font-bold transition-colors min-h-[44px]"
           >
             <LogOut className="w-4 h-4" />
             <span>تسجيل الخروج</span>

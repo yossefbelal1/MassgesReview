@@ -25,6 +25,17 @@ export default function AutomationsPage({ onNavigate }) {
     fetchAutomations();
   }, []);
 
+  useEffect(() => {
+    if (editModalOpen) {
+      document.body.classList.add('modal-open');
+    } else {
+      document.body.classList.remove('modal-open');
+    }
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [editModalOpen]);
+
   const fetchAutomations = async () => {
     try {
       setLoading(true);
