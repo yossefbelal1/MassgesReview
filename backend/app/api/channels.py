@@ -122,6 +122,7 @@ async def verify_and_add_channel(
     db.flush()
 
     # 4. Auto-Seed Central Review Bank & Default Preset Automations (Zero Effort for Customer)
+    # 4. Auto-Seed Central Review Bank & Default Preset Automations (Zero Effort for Customer)
     existing_messages = db.query(MessageLibrary).filter(MessageLibrary.tenant_id == current_user.tenant_id).all()
     if not existing_messages:
         # Seed default references from central bank
@@ -143,8 +144,11 @@ async def verify_and_add_channel(
         )
         db.add_all([default_msg1, default_msg2])
         db.flush()
+        existing_messages = [default_msg1, default_msg2]
 
-        # Create Default Preset Automations
+    # ALWAYS Create Default Preset Automations for EVERY newly added channel!
+    channel_autos = db.query(Automation).filter(Automation.channel_id == new_channel.id).all()
+    if not channel_autos:
         auto1 = Automation(
             tenant_id=current_user.tenant_id,
             channel_id=new_channel.id,
@@ -152,6 +156,7 @@ async def verify_and_add_channel(
             trigger_type="contains",
             trigger_value="TP1",
             reviews_count=2,
+            initial_delay_seconds=3.0,
             delay_seconds=4.0,
             is_active=True
         )
@@ -162,25 +167,29 @@ async def verify_and_add_channel(
             trigger_type="contains",
             trigger_value="TP2",
             reviews_count=3,
+            initial_delay_seconds=5.0,
             delay_seconds=5.0,
             is_active=True
         )
         db.add_all([auto1, auto2])
         db.flush()
 
-        step1 = AutomationStep(
-            automation_id=auto1.id,
-            message_id=default_msg1.id,
-            step_order=1,
-            delay_seconds=3
-        )
-        step3 = AutomationStep(
-            automation_id=auto2.id,
-            message_id=default_msg2.id,
-            step_order=1,
-            delay_seconds=5
-        )
-        db.add_all([step1, step3])
+        if existing_messages:
+            msg1 = existing_messages[0]
+            msg2 = existing_messages[1] if len(existing_messages) > 1 else msg1
+            step1 = AutomationStep(
+                automation_id=auto1.id,
+                message_id=msg1.id,
+                step_order=1,
+                delay_seconds=3
+            )
+            step2 = AutomationStep(
+                automation_id=auto2.id,
+                message_id=msg2.id,
+                step_order=1,
+                delay_seconds=5
+            )
+            db.add_all([step1, step2])
 
     # Audit log
     db.add(AuditLog(
