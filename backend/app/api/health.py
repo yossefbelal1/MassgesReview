@@ -28,17 +28,21 @@ async def readiness(response: Response, db: Session = Depends(get_db)):
     except Exception:
         is_ready = False
 
-    tg_health = await telegram_service.get_health_status()
-    if tg_health["status"] == "unhealthy":
-        is_ready = False
+    now_utc = datetime.now(timezone.utc)
+    latest_hb = db.query(WorkerHeartbeat).order_by(WorkerHeartbeat.last_heartbeat_at.desc()).first()
+    worker_status = "offline"
+    if latest_hb and latest_hb.last_heartbeat_at:
+        hb_dt = latest_hb.last_heartbeat_at if latest_hb.last_heartbeat_at.tzinfo else latest_hb.last_heartbeat_at.replace(tzinfo=timezone.utc)
+        if (now_utc - hb_dt).total_seconds() < 60:
+            worker_status = "healthy"
 
-    if not is_ready:
+    if not db_ok or worker_status != "healthy":
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
-        "status": "READY" if is_ready else "UNHEALTHY",
+        "status": "READY" if (db_ok and worker_status == "healthy") else "DEGRADED",
         "database": "connected" if db_ok else "unreachable",
-        "telegram": tg_health["status"]
+        "telegram_worker": worker_status
     }
 
 @router.get("/")
@@ -54,7 +58,6 @@ async def full_health(response: Response, db: Session = Depends(get_db)):
     except Exception as e:
         db_status = f"unhealthy: {e}"
 
-    tg_health = await telegram_service.get_health_status()
 
     # Check worker heartbeat
     now_utc = datetime.now(timezone.utc)
@@ -78,7 +81,7 @@ async def full_health(response: Response, db: Session = Depends(get_db)):
     if db_status != "healthy":
         overall_status = "UNHEALTHY"
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    elif tg_health["status"] == "unhealthy" or worker_status in ["unhealthy", "offline"]:
+    elif worker_status in ["unhealthy", "offline"]:
         overall_status = "DEGRADED"
     else:
         overall_status = "READY"
@@ -102,6 +105,9 @@ async def full_health(response: Response, db: Session = Depends(get_db)):
                 "last_heartbeat_age_seconds": worker_age,
                 "worker_id": latest_hb.worker_id if latest_hb else None
             },
-            "telegram_engine": tg_health
+            "telegram_engine": {
+                "status": worker_status,
+                "service": "telegram_worker"
+            }
         }
     }
