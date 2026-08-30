@@ -133,8 +133,22 @@ async def worker_job_executor():
             job = claim_next_job(db, WORKER_ID, lease_duration_seconds=60)
             if job:
                 print(f"\n[⚡ Claimed Job {job.id[:8]}]: Channel {job.channel_id} | Trigger '{job.trigger_text}'", flush=True)
-                await process_claimed_job(db, client, job, WORKER_ID)
+                job_id = job.id
                 db.close()
+
+                async def _run_job_task(target_job_id: str):
+                    task_db: Session = SessionLocal()
+                    try:
+                        j = task_db.query(Job).filter(Job.id == target_job_id).first()
+                        if j:
+                            cl = await telegram_service.ensure_connected()
+                            await process_claimed_job(task_db, cl, j, WORKER_ID)
+                    except Exception as j_err:
+                        print(f"[!] Job {target_job_id[:8]} execution error: {j_err}", flush=True)
+                    finally:
+                        task_db.close()
+
+                asyncio.create_task(_run_job_task(job_id))
                 continue
 
             db.close()
@@ -144,7 +158,7 @@ async def worker_job_executor():
             if "disconnected" in err_str or "connection" in err_str:
                 await telegram_service.ensure_connected()
 
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.5)
 
 async def keepalive_ping():
     """Keeps the MTProto TCP session alive and healthy 24/7."""

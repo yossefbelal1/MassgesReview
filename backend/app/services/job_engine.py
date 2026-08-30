@@ -101,6 +101,7 @@ def ingest_channel_messages(
                         # If another worker races to create the same idempotency_key, the unique
                         # index will raise IntegrityError, cleanly rolling back this savepoint without
                         # corrupting the outer database session or crashing the ingestion batch.
+                        init_delay = float(getattr(auto, 'initial_delay_seconds', 5.0) or 5.0)
                         with db.begin_nested():
                             job = Job(
                                 tenant_id=channel.tenant_id,
@@ -112,7 +113,7 @@ def ingest_channel_messages(
                                 current_step=1,
                                 total_steps=auto.reviews_count or 2,
                                 status="PENDING",
-                                execute_at=now_utc
+                                execute_at=now_utc + timedelta(seconds=init_delay)
                             )
                             db.add(job)
                             db.flush()
@@ -451,9 +452,9 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                         db.commit()
 
                 if idx == 1:
-                    delay = max(0.5, round(initial_delay + random.uniform(-0.5, 0.8), 1))
+                    delay = max(0.5, round(random.uniform(0.5, 1.5), 1))
                 else:
-                    delay = max(1.5, round(base_delay + random.uniform(-0.8, 1.8), 1))
+                    delay = max(1.5, round(base_delay + random.uniform(-0.5, 1.5), 1))
 
                 await asyncio.sleep(delay)
 
