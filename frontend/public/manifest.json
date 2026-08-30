@@ -1,0 +1,18 @@
+{
+  "name": "ريفيو فلو | ReviewFlow",
+  "short_name": "ReviewFlow",
+  "description": "منصة أتمتة وإدارة قنوات التداول والفوركس 24/7",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://api.iconify.design/lucide:zap.svg?color=%2310b981",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

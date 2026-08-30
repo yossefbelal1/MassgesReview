@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { 
   LayoutDashboard, 
   Radio, 
-  Layers, 
   Workflow, 
   History, 
   CreditCard, 
@@ -12,20 +11,13 @@ import {
   LogOut,
   Zap,
   Shield,
-  UserCheck,
-  Sparkles,
-  ArrowLeftRight
+  UserCheck
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export default function Sidebar({ currentTab, setCurrentTab }) {
+export default function Sidebar({ currentTab, setCurrentTab, adminViewMode, setAdminViewMode }) {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin';
-
-  // For Admin: allow toggling between 'admin' and 'customer' views
-  const [adminViewMode, setAdminViewMode] = useState(() => {
-    return currentTab.startsWith('admin_') ? 'admin' : 'customer';
-  });
 
   const customerNav = [
     { id: 'dashboard', name: 'الرئيسية (الإحصائيات)', icon: LayoutDashboard },
@@ -45,16 +37,16 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
   const handleSwitchMode = (mode) => {
     setAdminViewMode(mode);
     if (mode === 'admin') {
-      setCurrentTab('admin_customers');
+      setCurrentTab('admin_dashboard');
     } else {
-      setCurrentTab('channels');
+      setCurrentTab('dashboard');
     }
   };
 
   const navItems = (isAdmin && adminViewMode === 'admin') ? adminNav : customerNav;
 
   return (
-    <aside className="w-64 bg-slate-900 border-l border-slate-800 flex flex-col h-screen select-none" dir="rtl">
+    <aside className="hidden md:flex w-64 bg-slate-900 border-l border-slate-800 flex-col h-screen select-none flex-shrink-0" dir="rtl">
       {/* Brand Header */}
       <div className="p-5 border-b border-slate-800 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -121,7 +113,7 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
 
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = currentTab === item.id;
+          const isActive = currentTab === item.id || (item.id === 'automations' && currentTab === 'create_automation');
           return (
             <button
               key={item.id}
@@ -143,7 +135,7 @@ export default function Sidebar({ currentTab, setCurrentTab }) {
       <div className="p-4 border-t border-slate-800 bg-slate-900/50">
         <div className="flex items-center justify-between mb-3 px-2">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">
+            <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 flex-shrink-0">
               {user?.full_name?.charAt(0) || 'ع'}
             </div>
             <div className="overflow-hidden">

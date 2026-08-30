@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useAuth, AuthProvider } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
 import Navbar from './components/Navbar';
+import MobileBottomNav from './components/MobileBottomNav';
+import MobileDrawer from './components/MobileDrawer';
 import Login from './pages/Login';
 import Register from './pages/Register';
 
@@ -23,12 +25,16 @@ function MainApp() {
   const { user, loading } = useAuth();
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
   const [currentTab, setCurrentTab] = useState('dashboard');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [adminViewMode, setAdminViewMode] = useState(() => {
+    return user?.role === 'admin' ? 'admin' : 'customer';
+  });
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500 mr-3"></div>
-        <span>Starting ReviewFlow Engine...</span>
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-500"></div>
+        <span className="text-sm font-medium">جاري تشغيل منصة ريفيو فلو...</span>
       </div>
     );
   }
@@ -44,17 +50,17 @@ function MainApp() {
 
   const getPageTitle = () => {
     switch (effectiveTab) {
-      case 'dashboard': return 'Dashboard Overview';
-      case 'channels': return 'Telegram Channels';
-      case 'automations': return 'Trade Signal Automations';
-      case 'create_automation': return 'Build Sequence Automation';
-      case 'history': return 'Publishing & Execution History';
-      case 'subscription': return 'Subscription & Plan Management';
-      case 'admin_dashboard': return 'Admin Operations Overview';
-      case 'admin_customers': return 'Customer Tenants Management';
-      case 'admin_plans': return 'SaaS Plan & Resource Limits';
-      case 'admin_health': return 'SaaS System Health & Worker Queues';
-      default: return 'ReviewFlow Platform';
+      case 'dashboard': return 'الرئيسية والإحصائيات';
+      case 'channels': return 'قنوات تيليجرام';
+      case 'automations': return 'الكلمات المفتاحية والأهداف';
+      case 'create_automation': return 'إنشاء هدف / كلمة مفتاحية';
+      case 'history': return 'سجل النشر المباشر';
+      case 'subscription': return 'الاشتراك والباقات';
+      case 'admin_dashboard': return 'لوحة تحكم الأدمن';
+      case 'admin_customers': return 'قائمة المشتركين والعملاء';
+      case 'admin_plans': return 'إدارة الباقات والحدود';
+      case 'admin_health': return 'صحة السيرفر والعمال';
+      default: return 'ريفيو فلو SaaS';
     }
   };
 
@@ -90,13 +96,47 @@ function MainApp() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
-      <Sidebar currentTab={effectiveTab} setCurrentTab={setCurrentTab} />
-      <div className="flex-1 flex flex-col h-screen overflow-hidden">
-        <Navbar title={getPageTitle()} />
-        <main className="flex-1 overflow-y-auto p-8 bg-slate-950/70">
-          {renderContent()}
+    <div className="flex h-screen h-[100dvh] bg-slate-950 text-slate-100 overflow-hidden" dir="rtl">
+      {/* Desktop Sidebar */}
+      <Sidebar 
+        currentTab={effectiveTab} 
+        setCurrentTab={setCurrentTab} 
+        adminViewMode={adminViewMode}
+        setAdminViewMode={setAdminViewMode}
+      />
+
+      {/* Main Content Viewport */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+        {/* Top Navbar */}
+        <Navbar 
+          title={getPageTitle()} 
+          onOpenDrawer={() => setDrawerOpen(true)} 
+        />
+
+        {/* Scrollable Page Content */}
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 md:p-8 pb-24 md:pb-8 bg-slate-950/70">
+          <div className="max-w-7xl mx-auto w-full">
+            {renderContent()}
+          </div>
         </main>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <MobileBottomNav 
+          currentTab={effectiveTab} 
+          setCurrentTab={setCurrentTab} 
+          adminViewMode={adminViewMode}
+          onOpenDrawer={() => setDrawerOpen(true)}
+        />
+
+        {/* Mobile Slide Drawer Menu */}
+        <MobileDrawer 
+          isOpen={drawerOpen} 
+          onClose={() => setDrawerOpen(false)} 
+          currentTab={effectiveTab} 
+          setCurrentTab={setCurrentTab}
+          adminViewMode={adminViewMode}
+          setAdminViewMode={setAdminViewMode}
+        />
       </div>
     </div>
   );

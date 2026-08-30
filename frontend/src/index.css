@@ -3,15 +3,48 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    height: 100%;
+  }
+
   body {
     @apply bg-slate-950 text-slate-100;
+    min-height: 100%;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+
+  /* Prevent font auto-zoom on iPhone/Safari */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  @media (min-width: 640px) {
+    input, select, textarea {
+      font-size: 0.875rem !important; /* 14px on desktop */
+    }
+  }
+}
+
+@layer utilities {
+  /* Safe Area Support for iPhone X / Dynamic Island */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 16px);
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .bottom-safe {
+    bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {

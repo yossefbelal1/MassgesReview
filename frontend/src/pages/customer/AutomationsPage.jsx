@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import apiClient from '../../api/client';
-import { Workflow, Plus, Play, Pause, Trash2, ArrowRight, Clock, Layers, Sparkles, CheckCircle2, Edit3, X } from 'lucide-react';
+import { 
+  Workflow, Plus, Play, Pause, Trash2, Clock, Sparkles, 
+  CheckCircle2, Edit3, X, Radio, ArrowUpRight, Zap, AlertCircle
+} from 'lucide-react';
 
 export default function AutomationsPage({ onNavigate }) {
   const [automations, setAutomations] = useState([]);
@@ -101,270 +104,245 @@ export default function AutomationsPage({ onNavigate }) {
   };
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-4 sm:space-y-6" dir="rtl">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">الكلمات المفتاحية وإعدادات الأهداف</h1>
-          <p className="text-xs text-slate-400 mt-1">تحديد كلمات ضرب الهدف (مثل: TP1, TP2)، عدد التقييمات، والفواصل الزمنية العشوائية الذكية.</p>
+          <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">الكلمات المفتاحية والأهداف (Automations)</h1>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">راقب إشارات القناة مثل TP1 / TP2 / أرباحكم ونفذ النشر التلقائي.</p>
         </div>
+
         <button
           onClick={() => onNavigate('create_automation')}
-          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-950 transition-all flex items-center justify-center gap-2"
+          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold shadow-lg shadow-emerald-950 transition-all flex items-center justify-center gap-2 self-stretch sm:self-auto"
         >
-          <Plus className="w-4 h-4" />
-          <span>إضافة هدف / كلمة جديدة</span>
+          <Plus className="w-4 h-4 flex-shrink-0" />
+          <span>إضافة هدف جديد</span>
         </button>
       </div>
 
-      {/* List */}
+      {/* Automations List */}
       {loading ? (
-        <div className="p-12 text-center text-slate-400">جاري تحميل الأهداف...</div>
+        <div className="p-12 text-center text-slate-400">جاري تحميل الأتمتات...</div>
       ) : automations.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
-          <Workflow className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-white mb-1">لا توجد أهداف مفعلة حالياً</h3>
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 sm:p-12 text-center">
+          <Workflow className="w-10 sm:w-12 h-10 sm:h-12 text-slate-600 mx-auto mb-3" />
+          <h3 className="text-sm sm:text-base font-bold text-white mb-1">لا توجد كلمات مفتاحية مراقبة حالياً</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
-            حدد الكلمة التي تريد مراقبتها في قناتك (مثال: عندما تكتب "TP1" ➔ إرسال 2 ريفيو بفارق 4 ثوانٍ تلقائياً).
+            أنشئ أول هدف لمراقبة الكلمات المنشورة في قناتك وإرسال ريفيوهات تلقائياً.
           </p>
           <button
             onClick={() => onNavigate('create_automation')}
-            className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all inline-flex items-center gap-2"
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all inline-flex items-center justify-center gap-2"
           >
             <Plus className="w-4 h-4" />
-            <span>إنشاء أول هدف</span>
+            <span>إنشاء أول أتمتة الآن</span>
           </button>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {automations.map((auto) => (
-            <div 
+            <div
               key={auto.id}
-              className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-6 transition-all shadow-md"
+              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 transition-all shadow-md flex flex-col justify-between ${
+                auto.is_active ? 'border-slate-800 hover:border-slate-700' : 'border-slate-800/40 opacity-75'
+              }`}
             >
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-base font-bold text-white">{auto.name}</h3>
-                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                      auto.is_active 
-                        ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' 
-                        : 'bg-slate-800 border border-slate-700 text-slate-400'
-                    }`}>
-                      {auto.is_active ? 'مفعل وشغال' : 'متوقف مؤقتاً'}
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">القناة: {auto.channel?.title || 'القناة المرتبطة'}</span>
-                  </div>
-
-                  {/* Trigger & Config Badges */}
-                  <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-300">
-                    <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 text-[11px]">الكلمة المراقبة:</span>
-                      <span className="font-mono font-bold text-emerald-400">"{auto.trigger_value}"</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 text-[11px]">عدد الرسائل:</span>
-                      <span className="font-bold text-white font-mono">{auto.reviews_count || 2} رسائل</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 text-[11px]">تأخير البدء:</span>
-                      <span className="font-bold text-sky-400 font-mono">~{auto.initial_delay_seconds || 5} ثوانٍ</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
-                      <span className="text-slate-400 text-[11px]">الفواصل بين الرسائل:</span>
-                      <span className="font-bold text-amber-400 font-mono">~{auto.delay_seconds || 4} ثوانٍ</span>
-                      <span className="text-[10px] text-slate-400">(+ تنويع بشري)</span>
+              <div>
+                {/* Top Row: Title & Active Toggle */}
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="overflow-hidden">
+                    <h3 className="text-sm font-bold text-white truncate">{auto.name}</h3>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <Radio className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                      <span className="text-[11px] text-slate-400 truncate">
+                        {auto.channel?.title || 'قناة غير محددة'}
+                      </span>
                     </div>
                   </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-2 self-end lg:self-center">
-                  <button
-                    onClick={() => openEditModal(auto)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors flex items-center gap-1.5"
-                    title="تعديل الكلمة والعدد والفواصل"
-                  >
-                    <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>تعديل الإعدادات</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleRunNow(auto.id)}
-                    disabled={actionLoading === auto.id}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-semibold transition-colors flex items-center gap-1.5"
-                    title="اختبار الإرسال الآن فوراً"
-                  >
-                    <Play className="w-3.5 h-3.5" />
-                    <span>تجربة الآن</span>
-                  </button>
 
                   <button
                     onClick={() => handleToggle(auto.id)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                    className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition-colors flex items-center gap-1 flex-shrink-0 ${
+                      auto.is_active
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-slate-800 border-slate-700 text-slate-400'
+                    }`}
                   >
-                    {auto.is_active ? <Pause className="w-3.5 h-3.5 text-amber-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
-                    <span>{auto.is_active ? 'إيقاف مؤقت' : 'تفعيل'}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${auto.is_active ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
+                    <span>{auto.is_active ? 'مفعلة' : 'متوقفة'}</span>
                   </button>
+                </div>
 
-                  <button
-                    onClick={() => handleDelete(auto.id)}
-                    className="p-2 rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                    title="حذف الهدف"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {/* Trigger Badge */}
+                <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 my-3">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-[10px] text-slate-400">الكلمة المراقبة:</span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {auto.trigger_type === 'exact' ? 'مطابقة تامة' : 'تحتوي على'}
+                    </span>
+                  </div>
+                  <div className="text-sm font-extrabold text-emerald-400 font-mono tracking-wide break-words">
+                    "{auto.trigger_value}"
+                  </div>
+                </div>
+
+                {/* Timing Config Summary */}
+                <div className="grid grid-cols-3 gap-2 text-center text-xs mb-3">
+                  <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 block">العدد</span>
+                    <strong className="text-white text-xs">{auto.reviews_count || 2} رسائل</strong>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 block">بدء الإرسال</span>
+                    <strong className="text-white text-xs">{auto.initial_delay_seconds || 5} ث</strong>
+                  </div>
+                  <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/60">
+                    <span className="text-[10px] text-slate-400 block">الفواصل</span>
+                    <strong className="text-white text-xs">{auto.delay_seconds || 4} ث</strong>
+                  </div>
                 </div>
               </div>
 
-              {/* Sequence Info */}
-              <div className="mt-4 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>توليد آراء المتداولين: نشط وتلقائي (أعضاء موثوقين ومتنوعين)</span>
-                </span>
-                <span>إجمالي مرات التنفيذ: <strong className="text-white font-mono">{auto.total_executions || 0}</strong></span>
+              {/* Action Buttons Row */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                <button
+                  onClick={() => handleRunNow(auto.id)}
+                  disabled={actionLoading === auto.id || !auto.is_active}
+                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 active:scale-95 border border-emerald-500/20 text-emerald-400 disabled:opacity-40 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>{actionLoading === auto.id ? 'جاري الإرسال...' : 'تجربة فورية 🚀'}</span>
+                </button>
+
+                <button
+                  onClick={() => openEditModal(auto)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition-colors"
+                  title="تعديل الأتمتة"
+                  aria-label="تعديل"
+                >
+                  <Edit3 className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => handleDelete(auto.id)}
+                  className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 text-xs font-medium transition-colors"
+                  title="حذف الأتمتة"
+                  aria-label="حذف"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Edit Trigger Modal */}
+      {/* EDIT AUTOMATION MODAL (Mobile-Friendly Dialog) */}
       {editModalOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-emerald-400" />
-                <span>تعديل إعدادات الهدف والكلمة المفتاحية</span>
-              </h3>
-              <button onClick={() => setEditModalOpen(false)} className="text-slate-400 hover:text-slate-200">
-                <X className="w-5 h-5" />
-              </button>
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm" dir="rtl">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl max-w-lg w-full p-5 sm:p-8 max-h-[92vh] overflow-y-auto shadow-2xl relative">
+            <button
+              onClick={() => setEditModalOpen(false)}
+              className="absolute left-4 top-4 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors"
+              aria-label="إغلاق"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="mb-5">
+              <h3 className="text-base font-bold text-white">تعديل الهدف / الكلمة المفتاحية</h3>
+              <p className="text-xs text-slate-400 mt-1">قم بتحديث اسم الهدف والكلمة المراقبة والتوقيتات.</p>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-6 space-y-4">
+            <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">اسم الهدف / التسمية</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  اسم الهدف
+                </label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none"
                   required
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  الكلمة المفتاحية المراقبة (مثال: TP1 أو الهدف الأول أو GOLD TP)
+                  الكلمة المفتاحية المراقبة
                 </label>
                 <input
                   type="text"
                   value={editTriggerValue}
                   onChange={(e) => setEditTriggerValue(e.target.value)}
-                  placeholder="مثال: TP1 أو 🎯 الهدف الأول"
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-emerald-400 font-mono text-sm outline-none"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-emerald-400 font-mono text-sm outline-none"
                   required
                 />
-                <p className="text-[11px] text-slate-400 mt-1">بمجرد نشر هذه الكلمة في قناتك، سيبدأ البوت بنشر التقييمات تلقائياً.</p>
               </div>
 
-              {/* Reviews Count & Delay Configuration */}
-              <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-white mb-1.5">
-                      عدد الرسائل
-                    </label>
-                    <select
-                      value={editReviewsCount}
-                      onChange={(e) => setEditReviewsCount(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-emerald-400 font-bold text-xs outline-none"
-                    >
-                      <option value="1">1 رسالة واحدة</option>
-                      <option value="2">2 رسائل (الموصى به)</option>
-                      <option value="3">3 رسائل</option>
-                      <option value="4">4 رسائل</option>
-                      <option value="5">5 رسائل</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-white mb-1.5">
-                      تأخير البدء
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="0"
-                        max="300"
-                        value={editInitialDelaySeconds}
-                        onChange={(e) => setEditInitialDelaySeconds(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-sky-400 font-bold text-xs outline-none font-mono"
-                        required
-                      />
-                      <span className="text-xs text-slate-400 font-medium">ثوانٍ</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-white mb-1.5">
-                      الفواصل بين الرسائل
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        min="1"
-                        max="60"
-                        value={editDelaySeconds}
-                        onChange={(e) => setEditDelaySeconds(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-amber-400 font-bold text-xs outline-none font-mono"
-                        required
-                      />
-                      <span className="text-xs text-slate-400 font-medium">ثوانٍ</span>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    عدد الرسائل
+                  </label>
+                  <select
+                    value={editReviewsCount}
+                    onChange={(e) => setEditReviewsCount(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none"
+                  >
+                    <option value="1">1 رسالة</option>
+                    <option value="2">2 رسائل</option>
+                    <option value="3">3 رسائل</option>
+                    <option value="4">4 رسائل</option>
+                    <option value="5">5 رسائل</option>
+                  </select>
                 </div>
 
-                <div className="pt-1 text-[11px] text-slate-400 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                  <span><strong>تأخير البدء:</strong> الوقت الذي ينتظره البوت بعد رصد الكلمة قبل إرسال أول ريفيو، ثم يرسل باقي الريفيوهات بالفواصل المحددة.</span>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    بدء الإرسال (ث)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="600"
+                    value={editInitialDelaySeconds}
+                    onChange={(e) => setEditInitialDelaySeconds(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    الفواصل (ث)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    value={editDelaySeconds}
+                    onChange={(e) => setEditDelaySeconds(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">طريقة المطابقة</label>
-                <select
-                  value={editTriggerType}
-                  onChange={(e) => setEditTriggerType(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-xs outline-none"
-                >
-                  <option value="contains">تحتوي الكلمة في أي مكان بالرسالة (الأفضل والموصى به)</option>
-                  <option value="exact">مطابقة تامة للنص بالكامل فقط</option>
-                  <option value="prefix">تبدأ الرسالة بالكلمة</option>
-                </select>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setEditModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
                   disabled={savingEdit}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-lg shadow-emerald-950 flex items-center gap-1.5"
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg transition-all"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>{savingEdit ? 'جاري الحفظ...' : 'حفظ التعديل الآن'}</span>
+                  {savingEdit ? 'جاري الحفظ...' : 'حفظ التعديلات'}
                 </button>
               </div>
             </form>
@@ -374,4 +352,3 @@ export default function AutomationsPage({ onNavigate }) {
     </div>
   );
 }
-
