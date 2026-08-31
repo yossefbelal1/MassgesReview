@@ -5,6 +5,15 @@ import {
   CheckCircle2, Edit3, X, Radio, ArrowUpRight, Zap, AlertCircle
 } from 'lucide-react';
 
+export const formatDelayArabic = (seconds) => {
+  const s = parseFloat(seconds) || 0;
+  if (s >= 60 && s % 60 === 0) {
+    const mins = Math.floor(s / 60);
+    return mins === 1 ? '1 دقيقة' : mins === 2 ? '2 دقيقة' : `${mins} دقيقة`;
+  }
+  return `${s} ث`;
+};
+
 export default function AutomationsPage({ onNavigate }) {
   const [automations, setAutomations] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,8 +26,10 @@ export default function AutomationsPage({ onNavigate }) {
   const [editTriggerValue, setEditTriggerValue] = useState('');
   const [editTriggerType, setEditTriggerType] = useState('contains');
   const [editReviewsCount, setEditReviewsCount] = useState(2);
-  const [editInitialDelaySeconds, setEditInitialDelaySeconds] = useState(5);
-  const [editDelaySeconds, setEditDelaySeconds] = useState(4);
+  const [editInitialDelayValue, setEditInitialDelayValue] = useState(5);
+  const [editInitialDelayUnit, setEditInitialDelayUnit] = useState('seconds'); // 'seconds' | 'minutes'
+  const [editDelayValue, setEditDelayValue] = useState(4);
+  const [editDelayUnit, setEditDelayUnit] = useState('seconds'); // 'seconds' | 'minutes'
   const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
@@ -86,14 +97,39 @@ export default function AutomationsPage({ onNavigate }) {
     setEditTriggerValue(auto.trigger_value);
     setEditTriggerType(auto.trigger_type || 'contains');
     setEditReviewsCount(auto.reviews_count || 2);
-    setEditInitialDelaySeconds(auto.initial_delay_seconds || 5);
-    setEditDelaySeconds(auto.delay_seconds || 4);
+    
+    const initSec = auto.initial_delay_seconds || 5;
+    if (initSec >= 60 && initSec % 60 === 0) {
+      setEditInitialDelayValue(initSec / 60);
+      setEditInitialDelayUnit('minutes');
+    } else {
+      setEditInitialDelayValue(initSec);
+      setEditInitialDelayUnit('seconds');
+    }
+
+    const delSec = auto.delay_seconds || 4;
+    if (delSec >= 60 && delSec % 60 === 0) {
+      setEditDelayValue(delSec / 60);
+      setEditDelayUnit('minutes');
+    } else {
+      setEditDelayValue(delSec);
+      setEditDelayUnit('seconds');
+    }
+
     setEditModalOpen(true);
   };
 
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editingAuto || !editTriggerValue.trim()) return;
+
+    const calculatedInitialDelay = editInitialDelayUnit === 'minutes' 
+      ? (parseFloat(editInitialDelayValue) || 1) * 60 
+      : (parseFloat(editInitialDelayValue) || 5.0);
+
+    const calculatedDelay = editDelayUnit === 'minutes' 
+      ? (parseFloat(editDelayValue) || 1) * 60 
+      : (parseFloat(editDelayValue) || 4.0);
 
     try {
       setSavingEdit(true);
@@ -102,8 +138,8 @@ export default function AutomationsPage({ onNavigate }) {
         trigger_value: editTriggerValue.trim(),
         trigger_type: editTriggerType,
         reviews_count: parseInt(editReviewsCount) || 2,
-        initial_delay_seconds: parseFloat(editInitialDelaySeconds) || 5.0,
-        delay_seconds: parseFloat(editDelaySeconds) || 4.0
+        initial_delay_seconds: calculatedInitialDelay,
+        delay_seconds: calculatedDelay
       });
       setEditModalOpen(false);
       fetchAutomations();
@@ -180,22 +216,22 @@ export default function AutomationsPage({ onNavigate }) {
                         : 'bg-slate-800 border-slate-700 text-slate-400'
                     }`}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full ${auto.is_active ? 'bg-emerald-400' : 'bg-slate-500'}`}></span>
-                    <span>{auto.is_active ? 'مفعلة' : 'متوقفة'}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full ${auto.is_active ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                    <span>{auto.is_active ? 'نشط' : 'معطل'}</span>
                   </button>
                 </div>
 
-                {/* Trigger Badge */}
-                <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 my-3">
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="text-[10px] text-slate-400">الكلمة المراقبة:</span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {auto.trigger_type === 'exact' ? 'مطابقة تامة' : 'تحتوي على'}
+                {/* Trigger Keyword Badge */}
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="text-xs text-slate-400 flex-shrink-0">يراقب:</span>
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono font-bold text-xs truncate">
+                      {auto.trigger_value}
                     </span>
                   </div>
-                  <div className="text-sm font-extrabold text-emerald-400 font-mono tracking-wide break-words">
-                    "{auto.trigger_value}"
-                  </div>
+                  <span className="text-[10px] text-slate-500 uppercase font-semibold">
+                    {auto.trigger_type === 'contains' ? 'تتضمن' : auto.trigger_type}
+                  </span>
                 </div>
 
                 {/* Timing Config Summary */}
@@ -206,11 +242,11 @@ export default function AutomationsPage({ onNavigate }) {
                   </div>
                   <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/60">
                     <span className="text-[10px] text-slate-400 block">بدء الإرسال</span>
-                    <strong className="text-white text-xs">{auto.initial_delay_seconds || 5} ث</strong>
+                    <strong className="text-white text-xs">{formatDelayArabic(auto.initial_delay_seconds || 5)}</strong>
                   </div>
                   <div className="p-2 rounded-lg bg-slate-950/40 border border-slate-800/60">
                     <span className="text-[10px] text-slate-400 block">الفواصل</span>
-                    <strong className="text-white text-xs">{auto.delay_seconds || 4} ث</strong>
+                    <strong className="text-white text-xs">{formatDelayArabic(auto.delay_seconds || 4)}</strong>
                   </div>
                 </div>
               </div>
@@ -249,21 +285,21 @@ export default function AutomationsPage({ onNavigate }) {
         </div>
       )}
 
-      {/* EDIT AUTOMATION MODAL (Mobile-Friendly Dialog) */}
+      {/* Edit Automation Modal */}
       {editModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-sm" dir="rtl">
-          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl max-w-lg w-full p-5 sm:p-8 max-h-[92vh] overflow-y-auto shadow-2xl relative">
-            <button
-              onClick={() => setEditModalOpen(false)}
-              className="absolute left-4 top-4 text-slate-400 hover:text-white p-2 rounded-xl bg-slate-800/50 hover:bg-slate-800 transition-colors"
-              aria-label="إغلاق"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="mb-5">
-              <h3 className="text-base font-bold text-white">تعديل الهدف / الكلمة المفتاحية</h3>
-              <p className="text-xs text-slate-400 mt-1">قم بتحديث اسم الهدف والكلمة المراقبة والتوقيتات.</p>
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" dir="rtl">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl p-4 sm:p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-emerald-400" />
+                <span>تعديل الهدف والكلمة المفتاحية</span>
+              </h3>
+              <button
+                onClick={() => setEditModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             <form onSubmit={handleSaveEdit} className="space-y-4">
@@ -313,30 +349,52 @@ export default function AutomationsPage({ onNavigate }) {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    بدء الإرسال (ث)
+                    بدء الإرسال
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="600"
-                    value={editInitialDelaySeconds}
-                    onChange={(e) => setEditInitialDelaySeconds(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
-                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max={editInitialDelayUnit === 'minutes' ? 60 : 3600}
+                      value={editInitialDelayValue}
+                      onChange={(e) => setEditInitialDelayValue(e.target.value)}
+                      className="w-full px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
+                    />
+                    <select
+                      value={editInitialDelayUnit}
+                      onChange={(e) => setEditInitialDelayUnit(e.target.value)}
+                      className="px-2 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 text-[11px] font-bold outline-none cursor-pointer"
+                    >
+                      <option value="seconds">ثواني</option>
+                      <option value="minutes">دقائق</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    الفواصل (ث)
+                    الفواصل
                   </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="120"
-                    value={editDelaySeconds}
-                    onChange={(e) => setEditDelaySeconds(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
-                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max={editDelayUnit === 'minutes' ? 60 : 600}
+                      value={editDelayValue}
+                      onChange={(e) => setEditDelayValue(e.target.value)}
+                      className="w-full px-2.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none font-mono"
+                    />
+                    <select
+                      value={editDelayUnit}
+                      onChange={(e) => setEditDelayUnit(e.target.value)}
+                      className="px-2 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 text-[11px] font-bold outline-none cursor-pointer"
+                    >
+                      <option value="seconds">ثواني</option>
+                      <option value="minutes">دقائق</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 

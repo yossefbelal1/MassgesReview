@@ -215,6 +215,15 @@ export default function CustomerList() {
     setEditExpiryDate(base.toISOString().split('T')[0]);
   };
 
+  const formatDelayArabic = (seconds) => {
+    const s = parseFloat(seconds) || 0;
+    if (s >= 60 && s % 60 === 0) {
+      const mins = Math.floor(s / 60);
+      return mins === 1 ? '1 دقيقة' : mins === 2 ? '2 دقيقة' : `${mins} دقيقة`;
+    }
+    return `${s} ث`;
+  };
+
   // ── Admin Automations Actions ──
   const startAddAutomation = (channelId = '') => {
     setEditingAuto(null);
@@ -224,8 +233,10 @@ export default function CustomerList() {
       trigger_type: 'contains',
       channel_id: channelId || (customerDetails?.channels?.[0]?.id || ''),
       reviews_count: 2,
-      initial_delay_seconds: 5.0,
-      delay_seconds: 4.0,
+      initial_delay_value: 5,
+      initial_delay_unit: 'seconds',
+      delay_value: 4,
+      delay_unit: 'seconds',
       is_active: true
     });
     setIsAddingAuto(true);
@@ -234,14 +245,25 @@ export default function CustomerList() {
   const startEditAutomation = (auto) => {
     setIsAddingAuto(false);
     setEditingAuto(auto);
+
+    const initSec = auto.initial_delay_seconds || 5;
+    const initUnit = (initSec >= 60 && initSec % 60 === 0) ? 'minutes' : 'seconds';
+    const initVal = initUnit === 'minutes' ? initSec / 60 : initSec;
+
+    const delSec = auto.delay_seconds || 4;
+    const delUnit = (delSec >= 60 && delSec % 60 === 0) ? 'minutes' : 'seconds';
+    const delVal = delUnit === 'minutes' ? delSec / 60 : delSec;
+
     setAutoForm({
       name: auto.name || '',
       trigger_value: auto.trigger_value || '',
       trigger_type: auto.trigger_type || 'contains',
       channel_id: auto.channel_id || '',
       reviews_count: auto.reviews_count || 2,
-      initial_delay_seconds: auto.initial_delay_seconds || 5.0,
-      delay_seconds: auto.delay_seconds || 4.0,
+      initial_delay_value: initVal,
+      initial_delay_unit: initUnit,
+      delay_value: delVal,
+      delay_unit: delUnit,
       is_active: auto.is_active
     });
   };
@@ -250,15 +272,34 @@ export default function CustomerList() {
     e.preventDefault();
     if (!selectedCustomer) return;
 
+    const calculatedInitialDelay = autoForm.initial_delay_unit === 'minutes' 
+      ? (parseFloat(autoForm.initial_delay_value) || 1) * 60 
+      : (parseFloat(autoForm.initial_delay_value) || 5.0);
+
+    const calculatedDelay = autoForm.delay_unit === 'minutes' 
+      ? (parseFloat(autoForm.delay_value) || 1) * 60 
+      : (parseFloat(autoForm.delay_value) || 4.0);
+
+    const payload = {
+      name: autoForm.name,
+      trigger_value: autoForm.trigger_value,
+      trigger_type: autoForm.trigger_type,
+      channel_id: autoForm.channel_id,
+      reviews_count: autoForm.reviews_count,
+      initial_delay_seconds: calculatedInitialDelay,
+      delay_seconds: calculatedDelay,
+      is_active: autoForm.is_active
+    };
+
     try {
       setSavingAuto(true);
       if (editingAuto) {
         // Update existing automation
-        await apiClient.put(`/admin/automations/${editingAuto.id}`, autoForm);
+        await apiClient.put(`/admin/automations/${editingAuto.id}`, payload);
         alert('تم تعديل الهدف والكلمة المفتاحية بنجاح!');
       } else {
         // Create new automation
-        await apiClient.post(`/admin/customers/${selectedCustomer.id}/automations`, autoForm);
+        await apiClient.post(`/admin/customers/${selectedCustomer.id}/automations`, payload);
         alert('تم إضافة الهدف الجديد لهذا العميل بنجاح!');
       }
       setEditingAuto(null);
@@ -862,28 +903,50 @@ export default function CustomerList() {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">تأخير أول ريفيو (ثواني)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="60"
-                                value={autoForm.initial_delay_seconds}
-                                onChange={(e) => setAutoForm({ ...autoForm, initial_delay_seconds: parseFloat(e.target.value) || 5.0 })}
-                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
-                              />
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">تأخير أول ريفيو</label>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min="1"
+                                  max={autoForm.initial_delay_unit === 'minutes' ? 60 : 3600}
+                                  value={autoForm.initial_delay_value}
+                                  onChange={(e) => setAutoForm({ ...autoForm, initial_delay_value: e.target.value })}
+                                  className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none font-mono"
+                                />
+                                <select
+                                  value={autoForm.initial_delay_unit}
+                                  onChange={(e) => setAutoForm({ ...autoForm, initial_delay_unit: e.target.value })}
+                                  className="px-2 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-[11px] font-bold outline-none cursor-pointer"
+                                >
+                                  <option value="seconds">ثواني</option>
+                                  <option value="minutes">دقائق</option>
+                                </select>
+                              </div>
                             </div>
                             <div>
-                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">فاصل زمني بين الرسائل (ثواني)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                max="60"
-                                value={autoForm.delay_seconds}
-                                onChange={(e) => setAutoForm({ ...autoForm, delay_seconds: parseFloat(e.target.value) || 4.0 })}
-                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
-                              />
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">فاصل زمني بين الرسائل</label>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min="1"
+                                  max={autoForm.delay_unit === 'minutes' ? 60 : 600}
+                                  value={autoForm.delay_value}
+                                  onChange={(e) => setAutoForm({ ...autoForm, delay_value: e.target.value })}
+                                  className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none font-mono"
+                                />
+                                <select
+                                  value={autoForm.delay_unit}
+                                  onChange={(e) => setAutoForm({ ...autoForm, delay_unit: e.target.value })}
+                                  className="px-2 py-2 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-[11px] font-bold outline-none cursor-pointer"
+                                >
+                                  <option value="seconds">ثواني</option>
+                                  <option value="minutes">دقائق</option>
+                                </select>
+                              </div>
                             </div>
                           </div>
 
@@ -971,7 +1034,7 @@ export default function CustomerList() {
 
                                         <div className="flex items-center gap-3 text-[11px] text-slate-400">
                                           <span>📦 {auto.reviews_count || 2} ريفيو</span>
-                                          <span>⏱️ تأخير: {auto.initial_delay_seconds || 5}ث / فاصل: {auto.delay_seconds || 4}ث</span>
+                                          <span>⏱️ تأخير: {formatDelayArabic(auto.initial_delay_seconds || 5)} / فاصل: {formatDelayArabic(auto.delay_seconds || 4)}</span>
                                           <span>⚡ عدد مرات النشر: {auto.total_executions || 0}</span>
                                         </div>
                                       </div>

@@ -13,8 +13,10 @@ export default function CreateAutomation({ onNavigate }) {
   const [triggerValue, setTriggerValue] = useState('');
   const [triggerType, setTriggerType] = useState('contains');
   const [reviewsCount, setReviewsCount] = useState(2);
-  const [initialDelaySeconds, setInitialDelaySeconds] = useState(5);
-  const [delaySeconds, setDelaySeconds] = useState(4);
+  const [initialDelayValue, setInitialDelayValue] = useState(5);
+  const [initialDelayUnit, setInitialDelayUnit] = useState('seconds'); // 'seconds' | 'minutes'
+  const [delayValue, setDelayValue] = useState(4);
+  const [delayUnit, setDelayUnit] = useState('seconds'); // 'seconds' | 'minutes'
 
   useEffect(() => {
     fetchChannels();
@@ -58,6 +60,14 @@ export default function CreateAutomation({ onNavigate }) {
       return;
     }
 
+    const calculatedInitialDelay = initialDelayUnit === 'minutes' 
+      ? (parseFloat(initialDelayValue) || 1) * 60 
+      : (parseFloat(initialDelayValue) || 5.0);
+
+    const calculatedDelay = delayUnit === 'minutes' 
+      ? (parseFloat(delayValue) || 1) * 60 
+      : (parseFloat(delayValue) || 4.0);
+
     try {
       setSubmitting(true);
       await apiClient.post('/automations/', {
@@ -66,8 +76,8 @@ export default function CreateAutomation({ onNavigate }) {
         trigger_type: triggerType,
         trigger_value: triggerValue.trim(),
         reviews_count: parseInt(reviewsCount) || 2,
-        initial_delay_seconds: parseFloat(initialDelaySeconds) || 5.0,
-        delay_seconds: parseFloat(delaySeconds) || 4.0,
+        initial_delay_seconds: calculatedInitialDelay,
+        delay_seconds: calculatedDelay,
         steps: []
       });
       onNavigate('automations');
@@ -238,12 +248,19 @@ export default function CreateAutomation({ onNavigate }) {
                     type="number"
                     inputMode="numeric"
                     min="1"
-                    max="600"
-                    value={initialDelaySeconds}
-                    onChange={(e) => setInitialDelaySeconds(e.target.value)}
+                    max={initialDelayUnit === 'minutes' ? 60 : 3600}
+                    value={initialDelayValue}
+                    onChange={(e) => setInitialDelayValue(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none min-h-[44px]"
                   />
-                  <span className="text-xs text-slate-400 whitespace-nowrap">ثواني</span>
+                  <select
+                    value={initialDelayUnit}
+                    onChange={(e) => setInitialDelayUnit(e.target.value)}
+                    className="px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-slate-200 text-xs font-bold outline-none min-h-[44px] cursor-pointer"
+                  >
+                    <option value="seconds">ثواني</option>
+                    <option value="minutes">دقائق</option>
+                  </select>
                 </div>
               </div>
 
@@ -256,12 +273,19 @@ export default function CreateAutomation({ onNavigate }) {
                     type="number"
                     inputMode="numeric"
                     min="1"
-                    max="120"
-                    value={delaySeconds}
-                    onChange={(e) => setDelaySeconds(e.target.value)}
+                    max={delayUnit === 'minutes' ? 60 : 600}
+                    value={delayValue}
+                    onChange={(e) => setDelayValue(e.target.value)}
                     className="w-full px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-white text-xs font-mono outline-none min-h-[44px]"
                   />
-                  <span className="text-xs text-slate-400 whitespace-nowrap">ثواني</span>
+                  <select
+                    value={delayUnit}
+                    onChange={(e) => setDelayUnit(e.target.value)}
+                    className="px-3 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:border-emerald-500 text-slate-200 text-xs font-bold outline-none min-h-[44px] cursor-pointer"
+                  >
+                    <option value="seconds">ثواني</option>
+                    <option value="minutes">دقائق</option>
+                  </select>
                 </div>
               </div>
             </div>
