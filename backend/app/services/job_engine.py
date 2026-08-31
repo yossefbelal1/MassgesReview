@@ -410,7 +410,12 @@ async def process_claimed_job(db: Session, client: TelegramClient, job: Job, wor
                 return
 
         try:
-            bank_msgs = await client.get_messages(BANK_ID, limit=100)
+            if hasattr(client, 'get_messages'):
+                bank_msgs = await client.get_messages(BANK_ID, limit=100)
+            elif hasattr(client, 'client') and hasattr(client.client, 'get_messages'):
+                bank_msgs = await client.client.get_messages(BANK_ID, limit=100)
+            else:
+                bank_msgs = []
             valid_reviews = [m for m in bank_msgs if is_valid_member_review(m)]
 
             if not valid_reviews:

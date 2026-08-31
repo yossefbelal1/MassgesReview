@@ -50,6 +50,14 @@ class TelegramService:
             await self._client.connect()
         return self._client
 
+    @property
+    def client(self) -> Optional[TelegramClient]:
+        return self._client
+
+    async def get_messages(self, *args, **kwargs):
+        c = await self.get_client()
+        return await c.get_messages(*args, **kwargs)
+
     async def get_backup_client(self) -> Optional[TelegramClient]:
         """Returns the backup/failover Telegram client (Dala)."""
         if not self.backup_session_str:
