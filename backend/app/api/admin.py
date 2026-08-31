@@ -9,7 +9,7 @@ from backend.app.models.models import (
     Tenant, User, Plan, Subscription, Channel, Automation, MessageLibrary, Job, PublishingHistory, AuditLog
 )
 from backend.app.schemas.schemas import (
-    AdminStats, PlanCreate, PlanOut, SubscriptionUpdateAdmin, AdminResetPassword
+    AdminStats, PlanCreate, PlanOut, SubscriptionUpdateAdmin, AdminResetPassword, AutomationUpdateAdmin
 )
 from backend.app.api.deps import get_current_admin
 
@@ -82,6 +82,26 @@ def get_all_customers(
                 exp_at = exp_at.replace(tzinfo=timezone.utc)
             days_left = max(0, (exp_at - now).days)
 
+        auto_list = []
+        keywords = []
+        for a in automations:
+            auto_list.append({
+                "id": a.id,
+                "name": a.name,
+                "trigger_value": a.trigger_value,
+                "trigger_type": a.trigger_type,
+                "channel_id": a.channel_id,
+                "channel_title": a.channel.title if a.channel else "N/A",
+                "reviews_count": a.reviews_count or 2,
+                "initial_delay_seconds": a.initial_delay_seconds or 5.0,
+                "delay_seconds": a.delay_seconds or 4.0,
+                "is_active": a.is_active,
+                "total_executions": a.total_executions or 0,
+                "last_executed_at": a.last_executed_at.isoformat() if a.last_executed_at else None
+            })
+            if a.trigger_value and a.trigger_value not in keywords:
+                keywords.append(a.trigger_value)
+
         result.append({
             "id": t.id,
             "name": t.name,
@@ -92,7 +112,19 @@ def get_all_customers(
             "owner_id": owner.id if owner else None,
             "channels_count": len(channels),
             "automations_count": len(automations),
-            "channels": [{"id": c.id, "title": c.title, "chat_id": c.telegram_chat_id, "is_connected": c.is_connected} for c in channels],
+            "keywords": keywords,
+            "automations": auto_list,
+            "channels": [
+                {
+                    "id": c.id, 
+                    "title": c.title, 
+                    "chat_id": c.telegram_chat_id, 
+                    "is_connected": c.is_connected,
+                    "bot_is_admin": c.bot_is_admin,
+                    "backup_bot_is_admin": c.backup_bot_is_admin,
+                    "automations_count": len([a for a in automations if a.channel_id == c.id])
+                } for c in channels
+            ],
             "plan_name": sub.plan.name if sub and sub.plan else "None",
             "plan_slug": sub.plan.slug if sub and sub.plan else "starter",
             "plan_price": sub.plan.price_monthly if sub and sub.plan else 0,
@@ -147,12 +179,153 @@ def get_customer_details(
             "starts_at": tenant.subscription.starts_at.isoformat() if tenant.subscription and tenant.subscription.starts_at else None,
             "expires_at": tenant.subscription.expires_at.isoformat() if tenant.subscription and tenant.subscription.expires_at else None
         },
-        "channels": [{"id": c.id, "title": c.title, "chat_id": c.telegram_chat_id, "is_connected": c.is_connected, "bot_is_admin": c.bot_is_admin} for c in channels],
-        "automations": [{"id": a.id, "trigger_keyword": a.trigger_keyword, "name": a.name, "is_active": a.is_active, "match_type": a.match_type} for a in automations],
+        "channels": [
+            {
+                "id": c.id, 
+                "title": c.title, 
+                "chat_id": c.telegram_chat_id, 
+                "is_connected": c.is_connected, 
+                "bot_is_admin": c.bot_is_admin,
+                "backup_bot_is_admin": c.backup_bot_is_admin,
+                "automations_count": len([a for a in automations if a.channel_id == c.id])
+            } for c in channels
+        ],
+        "automations": [
+            {
+                "id": a.id, 
+                "name": a.name,
+                "trigger_value": a.trigger_value,
+                "trigger_type": a.trigger_type,
+                "channel_id": a.channel_id,
+                "channel_title": a.channel.title if a.channel else "N/A",
+                "reviews_count": a.reviews_count or 2,
+                "initial_delay_seconds": a.initial_delay_seconds or 5.0,
+                "delay_seconds": a.delay_seconds or 4.0,
+                "is_active": a.is_active,
+                "total_executions": a.total_executions or 0,
+                "last_executed_at": a.last_executed_at.isoformat() if a.last_executed_at else None
+            } for a in automations
+        ],
         "messages_count": len(messages),
         "recent_jobs": [{"id": j.id, "status": j.status, "trigger": j.trigger_text, "created_at": j.created_at.isoformat() if j.created_at else None} for j in jobs],
         "recent_history": [{"id": h.id, "status": h.status, "message": h.message_title, "published_at": h.published_at.isoformat() if h.published_at else None} for h in history]
     }
+
+@router.post("/customers/{tenant_id}/automations")
+def create_customer_automation_admin(
+    tenant_id: str,
+    data: AutomationUpdateAdmin,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    channel_id = data.channel_id
+    if not channel_id:
+        first_ch = db.query(Channel).filter(Channel.tenant_id == tenant.id).first()
+        if not first_ch:
+            raise HTTPException(status_code=400, detail="Customer has no connected channels")
+        channel_id = first_ch.id
+
+    auto = Automation(
+        tenant_id=tenant.id,
+        channel_id=channel_id,
+        name=data.name or data.trigger_value or "أتمتة جديدة",
+        trigger_value=data.trigger_value or "هدف",
+        trigger_type=data.trigger_type or "contains",
+        reviews_count=data.reviews_count or 2,
+        initial_delay_seconds=data.initial_delay_seconds if data.initial_delay_seconds is not None else 5.0,
+        delay_seconds=data.delay_seconds if data.delay_seconds is not None else 4.0,
+        is_active=data.is_active if data.is_active is not None else True
+    )
+    db.add(auto)
+    db.commit()
+    db.refresh(auto)
+    return {
+        "id": auto.id,
+        "name": auto.name,
+        "trigger_value": auto.trigger_value,
+        "trigger_type": auto.trigger_type,
+        "channel_id": auto.channel_id,
+        "channel_title": auto.channel.title if auto.channel else "N/A",
+        "reviews_count": auto.reviews_count,
+        "initial_delay_seconds": auto.initial_delay_seconds,
+        "delay_seconds": auto.delay_seconds,
+        "is_active": auto.is_active
+    }
+
+@router.put("/automations/{auto_id}")
+def update_automation_admin(
+    auto_id: str,
+    data: AutomationUpdateAdmin,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    auto = db.query(Automation).filter(Automation.id == auto_id).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    if data.name is not None:
+        auto.name = data.name
+    if data.trigger_value is not None:
+        auto.trigger_value = data.trigger_value
+    if data.trigger_type is not None:
+        auto.trigger_type = data.trigger_type
+    if data.channel_id is not None:
+        auto.channel_id = data.channel_id
+    if data.reviews_count is not None:
+        auto.reviews_count = data.reviews_count
+    if data.initial_delay_seconds is not None:
+        auto.initial_delay_seconds = data.initial_delay_seconds
+    if data.delay_seconds is not None:
+        auto.delay_seconds = data.delay_seconds
+    if data.is_active is not None:
+        auto.is_active = data.is_active
+
+    db.commit()
+    db.refresh(auto)
+    return {
+        "id": auto.id,
+        "name": auto.name,
+        "trigger_value": auto.trigger_value,
+        "trigger_type": auto.trigger_type,
+        "channel_id": auto.channel_id,
+        "channel_title": auto.channel.title if auto.channel else "N/A",
+        "reviews_count": auto.reviews_count,
+        "initial_delay_seconds": auto.initial_delay_seconds,
+        "delay_seconds": auto.delay_seconds,
+        "is_active": auto.is_active
+    }
+
+@router.delete("/automations/{auto_id}")
+def delete_automation_admin(
+    auto_id: str,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    auto = db.query(Automation).filter(Automation.id == auto_id).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    db.delete(auto)
+    db.commit()
+    return {"message": "تم حذف الأتمتة بنجاح"}
+
+@router.post("/automations/{auto_id}/toggle")
+def toggle_automation_admin(
+    auto_id: str,
+    admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    auto = db.query(Automation).filter(Automation.id == auto_id).first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    auto.is_active = not auto.is_active
+    db.commit()
+    return {"id": auto.id, "is_active": auto.is_active, "name": auto.name}
 
 @router.post("/customers/{tenant_id}/subscription/update")
 def update_customer_subscription_full(

@@ -148,6 +148,16 @@ class AutomationOut(AutomationBase):
     class Config:
         from_attributes = True
 
+class AutomationUpdateAdmin(BaseModel):
+    name: Optional[str] = None
+    channel_id: Optional[str] = None
+    trigger_type: Optional[str] = "contains"
+    trigger_value: Optional[str] = None
+    reviews_count: Optional[int] = 2
+    initial_delay_seconds: Optional[float] = 5.0
+    delay_seconds: Optional[float] = 4.0
+    is_active: Optional[bool] = True
+
 # Jobs & History
 class JobOut(BaseModel):
     id: str

@@ -5,7 +5,7 @@ import {
   Calendar, RefreshCw, X, ArrowLeft, ArrowRight, ShieldCheck, 
   Sliders, KeyRound, Trash2, Edit3, PauseCircle, PlayCircle, Plus,
   Radio, Workflow, Layers, AlertTriangle, ExternalLink, ChevronRight,
-  Sparkles, Check
+  Sparkles, Check, Zap, Hash, MessageSquare, ToggleLeft, ToggleRight
 } from 'lucide-react';
 
 export default function CustomerList() {
@@ -20,7 +20,7 @@ export default function CustomerList() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerDetails, setCustomerDetails] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
-  const [activeModalTab, setActiveModalTab] = useState('subscription');
+  const [activeModalTab, setActiveModalTab] = useState('subscription'); // 'subscription' | 'channels' | 'security'
 
   // Edit Subscription Form State
   const [editPlanSlug, setEditPlanSlug] = useState('pro');
@@ -31,6 +31,21 @@ export default function CustomerList() {
   // Reset Password State
   const [newPassword, setNewPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+
+  // Admin Automations & Trigger Management State
+  const [editingAuto, setEditingAuto] = useState(null);
+  const [isAddingAuto, setIsAddingAuto] = useState(false);
+  const [autoForm, setAutoForm] = useState({
+    name: '',
+    trigger_value: '',
+    trigger_type: 'contains',
+    channel_id: '',
+    reviews_count: 2,
+    initial_delay_seconds: 5.0,
+    delay_seconds: 4.0,
+    is_active: true
+  });
+  const [savingAuto, setSavingAuto] = useState(false);
 
   useEffect(() => {
     fetchCustomers();
@@ -66,6 +81,8 @@ export default function CustomerList() {
     setEditExpiryDate(c.expires_at ? c.expires_at.split('T')[0] : '');
     setNewPassword('');
     setActiveModalTab('subscription');
+    setEditingAuto(null);
+    setIsAddingAuto(false);
 
     try {
       setDetailsLoading(true);
@@ -78,9 +95,21 @@ export default function CustomerList() {
     }
   };
 
+  const refreshCustomerDetails = async (tenantId) => {
+    try {
+      const res = await apiClient.get(`/admin/customers/${tenantId}`);
+      setCustomerDetails(res.data);
+      await fetchCustomers();
+    } catch (err) {
+      console.error('Failed to refresh details:', err);
+    }
+  };
+
   const closeCustomerModal = () => {
     setSelectedCustomer(null);
     setCustomerDetails(null);
+    setEditingAuto(null);
+    setIsAddingAuto(false);
   };
 
   // Quick Extend (+N Days)
@@ -129,21 +158,14 @@ export default function CustomerList() {
         status: editStatus,
         expires_at: editExpiryDate ? new Date(editExpiryDate).toISOString() : null
       });
-      alert('تم تحديث بيانات اشتراك العميل بنجاح!');
       await fetchCustomers();
-      closeCustomerModal();
+      await refreshCustomerDetails(selectedCustomer.id);
+      alert('تم تحديث بيانات اشتراك العميل بنجاح!');
     } catch (err) {
-      alert(err.response?.data?.detail || 'فشل حفظ تعديلات الاشتراك');
+      alert('حدث خطأ أثناء تحديث الاشتراك');
     } finally {
       setSavingSub(false);
     }
-  };
-
-  // Add Days Quick Shortcut inside Modal
-  const handleAddDaysToForm = (days) => {
-    const base = editExpiryDate ? new Date(editExpiryDate) : new Date();
-    base.setDate(base.getDate() + days);
-    setEditExpiryDate(base.toISOString().split('T')[0]);
   };
 
   // Reset Customer Password
@@ -153,248 +175,316 @@ export default function CustomerList() {
 
     try {
       setSavingPassword(true);
-      const res = await apiClient.post(`/admin/customers/${selectedCustomer.id}/reset-password`, {
+      await apiClient.post(`/admin/customers/${selectedCustomer.id}/reset-password`, {
         new_password: newPassword
       });
-      alert(res.data.message || 'تم تعيين كلمة المرور الجديدة بنجاح');
       setNewPassword('');
+      alert('تم تعيين كلمة المرور الجديدة للمشترك بنجاح!');
     } catch (err) {
-      alert(err.response?.data?.detail || 'فشل تعيين كلمة المرور');
+      alert('فشل إعادة تعيين كلمة المرور');
     } finally {
       setSavingPassword(false);
     }
   };
 
-  // Delete Customer
+  // Delete Customer Account
   const handleDeleteCustomer = async () => {
     if (!selectedCustomer) return;
-    const confirmName = window.prompt(`تحذير أمني: لحذف هذا المشترك وكافة قنواته وبياناته نهائياً، اكتب اسم المشترك (${selectedCustomer.name}):`);
+    const confirmName = window.prompt(`تحذير أمني: لحذف العميل نهائياً، يرجى كتابة اسمه للتأكيد: "${selectedCustomer.name}"`);
     if (confirmName !== selectedCustomer.name) {
-      alert('لم يتم الحذف: الاسم غير متطابق.');
+      if (confirmName !== null) alert('لم يتم تأكيد الاسم بشكل صحيح. تم إلغاء العملية.');
       return;
     }
 
     try {
       setActionLoading(selectedCustomer.id);
       await apiClient.delete(`/admin/customers/${selectedCustomer.id}`);
-      alert('تم حذف المشترك بنجاح.');
       closeCustomerModal();
       await fetchCustomers();
+      alert('تم حذف حساب العميل وبياناته بنجاح.');
     } catch (err) {
-      alert('فشل حذف المشترك');
+      alert('فشل حذف حساب العميل');
     } finally {
       setActionLoading(null);
     }
   };
 
-  // Filtering
-  const filtered = customers.filter(c => {
-    const term = searchTerm.toLowerCase().trim();
-    const matchSearch = !term || (
-      c.name?.toLowerCase().includes(term) ||
-      c.owner_email?.toLowerCase().includes(term) ||
-      c.owner_name?.toLowerCase().includes(term) ||
-      c.slug?.toLowerCase().includes(term)
-    );
+  const handleAddDaysToForm = (days) => {
+    const base = editExpiryDate ? new Date(editExpiryDate) : new Date();
+    base.setDate(base.getDate() + days);
+    setEditExpiryDate(base.toISOString().split('T')[0]);
+  };
 
-    const matchStatus = statusFilter === 'all' || c.subscription_status === statusFilter;
-    const matchPlan = planFilter === 'all' || c.plan_slug === planFilter;
+  // ── Admin Automations Actions ──
+  const startAddAutomation = (channelId = '') => {
+    setEditingAuto(null);
+    setAutoForm({
+      name: 'ارباحكم ياخواتي',
+      trigger_value: 'ارباحكم',
+      trigger_type: 'contains',
+      channel_id: channelId || (customerDetails?.channels?.[0]?.id || ''),
+      reviews_count: 2,
+      initial_delay_seconds: 5.0,
+      delay_seconds: 4.0,
+      is_active: true
+    });
+    setIsAddingAuto(true);
+  };
 
-    return matchSearch && matchStatus && matchPlan;
+  const startEditAutomation = (auto) => {
+    setIsAddingAuto(false);
+    setEditingAuto(auto);
+    setAutoForm({
+      name: auto.name || '',
+      trigger_value: auto.trigger_value || '',
+      trigger_type: auto.trigger_type || 'contains',
+      channel_id: auto.channel_id || '',
+      reviews_count: auto.reviews_count || 2,
+      initial_delay_seconds: auto.initial_delay_seconds || 5.0,
+      delay_seconds: auto.delay_seconds || 4.0,
+      is_active: auto.is_active
+    });
+  };
+
+  const handleSaveAutomation = async (e) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+
+    try {
+      setSavingAuto(true);
+      if (editingAuto) {
+        // Update existing automation
+        await apiClient.put(`/admin/automations/${editingAuto.id}`, autoForm);
+        alert('تم تعديل الهدف والكلمة المفتاحية بنجاح!');
+      } else {
+        // Create new automation
+        await apiClient.post(`/admin/customers/${selectedCustomer.id}/automations`, autoForm);
+        alert('تم إضافة الهدف الجديد لهذا العميل بنجاح!');
+      }
+      setEditingAuto(null);
+      setIsAddingAuto(false);
+      await refreshCustomerDetails(selectedCustomer.id);
+    } catch (err) {
+      alert('فشل حفظ الأتمتة: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setSavingAuto(false);
+    }
+  };
+
+  const handleToggleAuto = async (autoId) => {
+    try {
+      await apiClient.post(`/admin/automations/${autoId}/toggle`);
+      await refreshCustomerDetails(selectedCustomer.id);
+    } catch (err) {
+      alert('فشل تغيير حالة الأتمتة');
+    }
+  };
+
+  const handleDeleteAuto = async (autoId, autoName) => {
+    if (!window.confirm(`هل أنت متأكد من حذف الهدف "${autoName}"؟`)) return;
+    try {
+      await apiClient.delete(`/admin/automations/${autoId}`);
+      await refreshCustomerDetails(selectedCustomer.id);
+    } catch (err) {
+      alert('فشل حذف الهدف');
+    }
+  };
+
+  // Filter customers
+  const filteredCustomers = customers.filter((c) => {
+    const matchesSearch = 
+      (c.name && c.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (c.owner_email && c.owner_email.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (c.owner_name && c.owner_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (c.keywords && c.keywords.some(k => k.toLowerCase().includes(searchTerm.toLowerCase())));
+
+    const matchesStatus = 
+      statusFilter === 'all' ? true :
+      statusFilter === 'active' ? c.subscription_status === 'active' :
+      statusFilter === 'trial' ? c.subscription_status === 'trial' :
+      statusFilter === 'suspended' ? c.subscription_status === 'suspended' :
+      statusFilter === 'expiring' ? (c.days_remaining <= 7 && c.days_remaining > 0) :
+      statusFilter === 'expired' ? (c.days_remaining === 0 || c.subscription_status === 'expired') : true;
+
+    const matchesPlan = planFilter === 'all' ? true : c.plan_slug === planFilter;
+
+    return matchesSearch && matchesStatus && matchesPlan;
   });
 
-  const totalActive = customers.filter(c => c.subscription_status === 'active' || c.subscription_status === 'trial').length;
-  const totalSuspended = customers.filter(c => c.subscription_status === 'suspended').length;
-  const totalExpiringSoon = customers.filter(c => c.days_remaining <= 7 && c.days_remaining > 0 && c.subscription_status === 'active').length;
-
   return (
-    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto" dir="rtl">
+    <div className="space-y-6 max-w-7xl mx-auto" dir="rtl">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-800 backdrop-blur-xl">
         <div>
-          <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">إدارة العملاء والمشتركين</h1>
-          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">التحكم في اشتراكات العملاء، تمديد الباقات، ومراقبة القنوات.</p>
+          <div className="flex items-center gap-2.5 mb-1.5">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <Users className="w-4 h-4" />
+            </div>
+            <h1 className="text-lg sm:text-xl font-black text-white tracking-tight">إدارة العملاء والقنوات والكلمات</h1>
+          </div>
+          <p className="text-xs text-slate-400">
+            متابعة المشتركين، ضبط الباقات، وتعديل كلمات وأهداف القنوات مباشرة لتوفير الراحة للعميل.
+          </p>
         </div>
 
         <button
           onClick={fetchCustomers}
-          className="px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-300 text-xs font-semibold flex items-center justify-center gap-1.5 self-start sm:self-auto"
+          disabled={loading}
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 text-slate-200 text-xs font-semibold transition-all active:scale-98 shadow-sm"
         >
-          <RefreshCw className="w-4 h-4 text-emerald-400" />
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
           <span>تحديث القائمة</span>
         </button>
       </div>
 
-      {/* KPI Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4">
-          <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block mb-1">إجمالي العملاء</span>
-          <span className="text-xl sm:text-2xl font-extrabold text-white">{customers.length}</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4">
-          <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block mb-1">الاشتراكات النشطة</span>
-          <span className="text-xl sm:text-2xl font-extrabold text-emerald-400">{totalActive}</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4">
-          <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block mb-1">تنتهي قريباً</span>
-          <span className="text-xl sm:text-2xl font-extrabold text-amber-400">{totalExpiringSoon}</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4">
-          <span className="text-[10px] sm:text-[11px] text-slate-400 font-medium block mb-1">المعلقة / المتوقفة</span>
-          <span className="text-xl sm:text-2xl font-extrabold text-rose-400">{totalSuspended}</span>
-        </div>
-      </div>
-
-      {/* Search & Filters */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-500 absolute right-3 top-2.5 sm:top-3" />
+      {/* Filter & Search Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="relative">
+          <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
             type="text"
-            placeholder="بحث بالاسم، البريد، أو المعرف..."
+            placeholder="بحث بالاسم، الإيميل، أو الكلمة المفتاحية (مثال: TP1, ارباحكم)..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pr-9 pl-4 py-2 sm:py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-xs outline-none"
+            className="w-full pl-4 pr-10 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 focus:border-emerald-500 text-white text-xs placeholder-slate-500 outline-none transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="flex-1 sm:flex-none px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none"
+            className="w-full px-3 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 text-xs outline-none focus:border-emerald-500"
           >
-            <option value="all">كافة الحالات</option>
-            <option value="active">نشط</option>
-            <option value="trial">تجريبي</option>
-            <option value="suspended">معلق</option>
-            <option value="expired">منتهي</option>
+            <option value="all">جميع الحالات</option>
+            <option value="active">نشط (Active)</option>
+            <option value="trial">تجريبي (Trial)</option>
+            <option value="expiring">ينتهي قريباً (أقل من 7 أيام)</option>
+            <option value="suspended">معلق مؤقتاً</option>
+            <option value="expired">منتهي الصلاحية</option>
           </select>
+        </div>
 
+        <div>
           <select
             value={planFilter}
             onChange={(e) => setPlanFilter(e.target.value)}
-            className="flex-1 sm:flex-none px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none"
+            className="w-full px-3 py-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300 text-xs outline-none focus:border-emerald-500"
           >
-            <option value="all">كافة الباقات</option>
-            <option value="starter">Starter ($20)</option>
-            <option value="pro">Pro ($40)</option>
-            <option value="vip">VIP ($100)</option>
+            <option value="all">جميع الباقات</option>
+            <option value="starter">الباقة الأساسية (Starter)</option>
+            <option value="pro">الباقة الاحترافية (Pro)</option>
+            <option value="vip">باقة النخبة (VIP)</option>
           </select>
         </div>
       </div>
 
-      {/* Customers List & Table */}
+      {/* Customers List / Table */}
       {loading ? (
-        <div className="p-12 text-center text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-3"></div>
-          <span>جاري تحميل بيانات المشتركين...</span>
+        <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800 flex flex-col items-center gap-3">
+          <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+          <span className="text-xs">جاري تحميل بيانات المشتركين وأهدافهم...</span>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="p-12 text-center text-slate-400 bg-slate-900 border border-slate-800 rounded-2xl">
-          لا يوجد عملاء يطابقون خيارات البحث.
+      ) : filteredCustomers.length === 0 ? (
+        <div className="p-12 text-center text-slate-400 bg-slate-900/40 rounded-2xl border border-slate-800">
+          <p className="text-xs">لا يوجد مشتركون مطابقون لخيارات البحث المحددة.</p>
         </div>
       ) : (
         <>
-          {/* Mobile Customer Cards (< lg) */}
-          <div className="lg:hidden space-y-3">
-            {filtered.map((c) => {
+          {/* Mobile Cards View */}
+          <div className="grid grid-cols-1 gap-3 md:hidden">
+            {filteredCustomers.map((c) => {
+              const isExpired = c.days_remaining === 0 || c.subscription_status === 'expired';
               const isExpiring = c.days_remaining <= 7 && c.days_remaining > 0 && c.subscription_status === 'active';
               const isSuspended = c.subscription_status === 'suspended';
-              const isExpired = c.days_remaining === 0 || c.subscription_status === 'expired';
 
               return (
-                <div 
-                  key={c.id} 
-                  className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md"
-                >
+                <div key={c.id} className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-slate-300 text-sm flex-shrink-0">
-                        {c.owner_name?.charAt(0) || c.name?.charAt(0) || 'U'}
-                      </div>
-                      <div className="overflow-hidden">
-                        <h4 className="text-xs font-bold text-white truncate">{c.name}</h4>
-                        <p className="text-[11px] text-slate-400 truncate">{c.owner_email}</p>
-                      </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>{c.name}</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400">{c.owner_email}</p>
                     </div>
 
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border flex-shrink-0 ${
-                      isSuspended
-                        ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-                        : isExpired
-                        ? 'bg-slate-800 border-slate-700 text-slate-400'
-                        : isExpiring
-                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                        : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                      c.plan_slug === 'vip' 
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' 
+                        : c.plan_slug === 'pro'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-300'
                     }`}>
-                      {c.subscription_status === 'active' ? 'نشط' :
-                       c.subscription_status === 'trial' ? 'تجريبي' :
-                       c.subscription_status === 'suspended' ? 'معلق' : 'منتهي'}
+                      {c.plan_name}
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                      <span className="text-[10px] text-slate-400 block">الباقة</span>
-                      <strong className="text-emerald-400 text-xs font-bold">{c.plan_name}</strong>
+                  {/* Keywords Tag List */}
+                  {c.keywords && c.keywords.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                      <span className="text-[10px] text-slate-400 font-semibold">الكلمات:</span>
+                      {c.keywords.map((kw, i) => (
+                        <span key={i} className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-[10px] font-bold">
+                          {kw}
+                        </span>
+                      ))}
                     </div>
-                    <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                      <span className="text-[10px] text-slate-400 block">القنوات المربوطة</span>
-                      <strong className="text-white text-xs">{c.channels_count} / {c.max_channels}</strong>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-800/60">
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">القنوات:</span>
+                      <span className="text-slate-200 font-semibold">{c.channels_count} / {c.max_channels} قنوات</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 text-[10px] block">المدة المتبقية:</span>
+                      <span className={`font-bold ${isExpiring ? 'text-amber-400' : isExpired ? 'text-rose-400' : 'text-slate-200'}`}>
+                        {c.days_remaining > 0 ? `${c.days_remaining} يوم` : 'منتهي'}
+                      </span>
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <span className={`text-[11px] font-bold ${isExpiring ? 'text-amber-400' : isExpired ? 'text-rose-400' : 'text-slate-300'}`}>
-                      {c.days_remaining > 0 ? `${c.days_remaining} يوم متبقي` : 'منتهي الصلاحية'}
-                    </span>
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-800/60">
+                    <button
+                      onClick={() => handleQuickExtend(c.id, 30)}
+                      disabled={actionLoading === c.id}
+                      className="flex-1 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold transition-all text-center"
+                    >
+                      +30 يوم
+                    </button>
 
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleQuickExtend(c.id, 30)}
-                        disabled={actionLoading === c.id}
-                        className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold"
-                      >
-                        +30 يوم
-                      </button>
-
-                      <button
-                        onClick={() => openCustomerModal(c)}
-                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold flex items-center gap-1"
-                      >
-                        <Sliders className="w-3 h-3" />
-                        <span>إدارة</span>
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => openCustomerModal(c)}
+                      className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-1"
+                    >
+                      <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>الكلمات والتحكم</span>
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Desktop Table (>= lg) */}
-          <div className="hidden lg:block bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+          {/* Desktop Table View */}
+          <div className="hidden md:block rounded-2xl bg-slate-900/60 border border-slate-800 overflow-hidden shadow-xl">
             <div className="overflow-x-auto">
-              <table className="w-full text-right border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/60 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-4 px-6">المشترك / الحساب</th>
-                    <th className="py-4 px-6">الباقة المفعلة</th>
-                    <th className="py-4 px-6">القنوات المربوطة</th>
-                    <th className="py-4 px-6">حالة الاشتراك</th>
-                    <th className="py-4 px-6">المدة المتبقية</th>
-                    <th className="py-4 px-6 text-center">إجراءات الإدارة السريعة</th>
+              <table className="w-full text-right text-xs text-slate-300">
+                <thead className="bg-slate-950/60 text-slate-400 uppercase text-[11px] font-bold border-b border-slate-800">
+                  <tr>
+                    <th className="py-3.5 px-6">المشترك</th>
+                    <th className="py-3.5 px-6">الباقة والسعة</th>
+                    <th className="py-3.5 px-6">الكلمات المفتاحية المراقبة</th>
+                    <th className="py-3.5 px-6">الحالة</th>
+                    <th className="py-3.5 px-6">المدة المتبقية</th>
+                    <th className="py-3.5 px-6 text-center">إجراءات سريعة وتحكم</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60 text-xs">
-                  {filtered.map((c) => {
+                <tbody className="divide-y divide-slate-800/60">
+                  {filteredCustomers.map((c) => {
+                    const isExpired = c.days_remaining === 0 || c.subscription_status === 'expired';
                     const isExpiring = c.days_remaining <= 7 && c.days_remaining > 0 && c.subscription_status === 'active';
                     const isSuspended = c.subscription_status === 'suspended';
-                    const isExpired = c.days_remaining === 0 || c.subscription_status === 'expired';
 
                     return (
                       <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
@@ -413,22 +503,35 @@ export default function CustomerList() {
                         </td>
 
                         <td className="py-4 px-6">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border inline-block ${
-                            c.plan_slug === 'vip' 
-                              ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' 
-                              : c.plan_slug === 'pro'
-                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
-                              : 'bg-slate-800 border-slate-700 text-slate-300'
-                          }`}>
-                            {c.plan_name} (${c.plan_price || 0})
-                          </span>
+                          <div className="space-y-1">
+                            <span className={`px-2.5 py-0.5 rounded-lg text-xs font-semibold border inline-block ${
+                              c.plan_slug === 'vip' 
+                                ? 'bg-amber-500/10 border-amber-500/20 text-amber-300' 
+                                : c.plan_slug === 'pro'
+                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                                : 'bg-slate-800 border-slate-700 text-slate-300'
+                            }`}>
+                              {c.plan_name} (${c.plan_price || 0})
+                            </span>
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <Radio className="w-3 h-3 text-emerald-400" />
+                              <span>{c.channels_count} / {c.max_channels} قنوات</span>
+                            </div>
+                          </div>
                         </td>
 
                         <td className="py-4 px-6">
-                          <div className="flex items-center gap-1.5 text-slate-300">
-                            <Radio className="w-3.5 h-3.5 text-emerald-400" />
-                            <span><strong>{c.channels_count}</strong> / {c.max_channels} قنوات</span>
-                          </div>
+                          {c.keywords && c.keywords.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {c.keywords.map((kw, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-[11px] font-semibold">
+                                  {kw}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic text-[11px]">لا توجد كلمات بعد</span>
+                          )}
                         </td>
 
                         <td className="py-4 px-6">
@@ -487,8 +590,8 @@ export default function CustomerList() {
                               onClick={() => openCustomerModal(c)}
                               className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-emerald-500 hover:text-emerald-400 text-slate-200 text-[11px] font-semibold transition-all flex items-center gap-1.5"
                             >
-                              <Sliders className="w-3.5 h-3.5" />
-                              <span>تحكم كامل</span>
+                              <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>الكلمات والتحكم</span>
                             </button>
                           </div>
                         </td>
@@ -502,10 +605,10 @@ export default function CustomerList() {
         </>
       )}
 
-      {/* FULL CONTROL CUSTOMER MODAL (Mobile-Friendly Slide-Up / Dialog) */}
+      {/* FULL CONTROL CUSTOMER MODAL */}
       {selectedCustomer && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" dir="rtl">
-          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="p-4 sm:p-6 border-b border-slate-800 flex items-center justify-between bg-slate-950/40">
               <div className="flex items-center gap-3 overflow-hidden">
@@ -541,13 +644,14 @@ export default function CustomerList() {
               </button>
               <button
                 onClick={() => setActiveModalTab('channels')}
-                className={`py-3 text-xs font-bold border-b-2 transition-colors whitespace-nowrap ${
+                className={`py-3 text-xs font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                   activeModalTab === 'channels'
                     ? 'border-emerald-500 text-emerald-400'
                     : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
-                القنوات والأهداف ({customerDetails?.channels?.length || 0})
+                <Zap className="w-3.5 h-3.5" />
+                <span>القنوات والكلمات المفتاحية ({customerDetails?.automations?.length || 0})</span>
               </button>
               <button
                 onClick={() => setActiveModalTab('security')}
@@ -563,6 +667,7 @@ export default function CustomerList() {
 
             {/* Modal Body Content */}
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+              {/* TAB 1: SUBSCRIPTION */}
               {activeModalTab === 'subscription' && (
                 <form onSubmit={handleSaveSubscription} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -646,30 +751,276 @@ export default function CustomerList() {
                 </form>
               )}
 
+              {/* TAB 2: CHANNELS & AUTOMATIONS MANAGER */}
               {activeModalTab === 'channels' && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {detailsLoading ? (
-                    <div className="p-8 text-center text-slate-400">جاري تحميل القنوات...</div>
-                  ) : !customerDetails?.channels || customerDetails.channels.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 bg-slate-950 rounded-xl">
-                      لا توجد قنوات مربوطة لهذا المشترك حتى الآن.
-                    </div>
+                    <div className="p-8 text-center text-slate-400">جاري تحميل القنوات والأهداف...</div>
                   ) : (
-                    customerDetails.channels.map((ch) => (
-                      <div key={ch.id} className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                    <>
+                      {/* Top Action Bar */}
+                      <div className="flex items-center justify-between bg-slate-950/60 p-3 rounded-xl border border-slate-800">
                         <div>
-                          <h4 className="text-xs font-bold text-white">{ch.title}</h4>
-                          <p className="text-[10px] text-slate-400 font-mono">{ch.telegram_chat_id}</p>
+                          <span className="text-xs font-bold text-white block">الأهداف والكلمات المفتاحية المراقبة</span>
+                          <span className="text-[11px] text-slate-400">يمكنك تعديل أي كلمة أو إضافة كلمات جديدة نيابة عن العميل فوراً.</span>
                         </div>
-                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded font-bold">
-                          {ch.automations_count || 0} أتمتة
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => startAddAutomation()}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition-all"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>إضافة هدف جديد</span>
+                        </button>
                       </div>
-                    ))
+
+                      {/* Inline Form (Create or Edit Automation) */}
+                      {(isAddingAuto || editingAuto) && (
+                        <form onSubmit={handleSaveAutomation} className="p-4 rounded-2xl bg-slate-950 border border-emerald-500/40 space-y-3 animate-in fade-in zoom-in-95 duration-100">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                            <h4 className="font-bold text-emerald-400 text-xs flex items-center gap-1.5">
+                              <Zap className="w-4 h-4" />
+                              <span>{editingAuto ? `تعديل الهدف: ${editingAuto.name}` : 'إضافة هدف مراقبة جديد للعميل'}</span>
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => { setEditingAuto(null); setIsAddingAuto(false); }}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">اسم الهدف</label>
+                              <input
+                                type="text"
+                                placeholder="مثال: الهدف الأول TP1 أو ارباحكم"
+                                value={autoForm.name}
+                                onChange={(e) => setAutoForm({ ...autoForm, name: e.target.value })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500"
+                                required
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                                الكلمة المفتاحية المراقبة (Trigger Keyword)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="مثال: TP1 أو ارباحكم"
+                                value={autoForm.trigger_value}
+                                onChange={(e) => setAutoForm({ ...autoForm, trigger_value: e.target.value })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-emerald-400 font-mono font-bold text-xs outline-none focus:border-emerald-500"
+                                required
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">القناة المستهدفة</label>
+                              <select
+                                value={autoForm.channel_id}
+                                onChange={(e) => setAutoForm({ ...autoForm, channel_id: e.target.value })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
+                              >
+                                {customerDetails?.channels?.map((ch) => (
+                                  <option key={ch.id} value={ch.id}>{ch.title}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">نوع المطابقة</label>
+                              <select
+                                value={autoForm.trigger_type}
+                                onChange={(e) => setAutoForm({ ...autoForm, trigger_type: e.target.value })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
+                              >
+                                <option value="contains">تتضمن الكلمة (Contains - موصى به)</option>
+                                <option value="exact">مطابقة تامة (Exact)</option>
+                                <option value="prefix">تبدأ بالكلمة (Prefix)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">عدد الريفيوهات للنشر</label>
+                              <select
+                                value={autoForm.reviews_count}
+                                onChange={(e) => setAutoForm({ ...autoForm, reviews_count: parseInt(e.target.value) })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none font-bold text-emerald-400"
+                              >
+                                <option value={1}>1 رسالة ريفيو</option>
+                                <option value={2}>2 رسائل ريفيو</option>
+                                <option value={3}>3 رسائل ريفيو</option>
+                                <option value={4}>4 رسائل ريفيو</option>
+                                <option value={5}>5 رسائل ريفيو</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">تأخير أول ريفيو (ثواني)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="60"
+                                value={autoForm.initial_delay_seconds}
+                                onChange={(e) => setAutoForm({ ...autoForm, initial_delay_seconds: parseFloat(e.target.value) || 5.0 })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-300 mb-1">فاصل زمني بين الرسائل (ثواني)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max="60"
+                                value={autoForm.delay_seconds}
+                                onChange={(e) => setAutoForm({ ...autoForm, delay_seconds: parseFloat(e.target.value) || 4.0 })}
+                                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2 pt-2">
+                            <button
+                              type="button"
+                              onClick={() => { setEditingAuto(null); setIsAddingAuto(false); }}
+                              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                            >
+                              إلغاء
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={savingAuto}
+                              className="px-6 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-md"
+                            >
+                              {savingAuto ? 'جاري الحفظ...' : editingAuto ? 'حفظ التعديلات' : 'إضافة الهدف الآن'}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+
+                      {/* Channels and Their Automations List */}
+                      {!customerDetails?.channels || customerDetails.channels.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 bg-slate-950 rounded-2xl border border-slate-800">
+                          لا توجد قنوات مربوطة لهذا المشترك حتى الآن.
+                        </div>
+                      ) : (
+                        customerDetails.channels.map((ch) => {
+                          const channelAutos = customerDetails.automations?.filter(a => a.channel_id === ch.id) || [];
+
+                          return (
+                            <div key={ch.id} className="rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden shadow-sm">
+                              {/* Channel Title Bar */}
+                              <div className="p-3.5 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold">
+                                    <Radio className="w-3.5 h-3.5" />
+                                  </div>
+                                  <div>
+                                    <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                                      <span>{ch.title}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono font-normal">({ch.chat_id})</span>
+                                    </h4>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
+                                    ch.bot_is_admin 
+                                      ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                      : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                                  }`}>
+                                    {ch.bot_is_admin ? 'مشرف مفعل' : 'البوت ليس مشرف'}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => startAddAutomation(ch.id)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-[11px] font-bold border border-slate-700 flex items-center gap-1"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>هدف للقناة</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Channel Automations */}
+                              <div className="p-3 space-y-2">
+                                {channelAutos.length === 0 ? (
+                                  <div className="py-4 text-center text-slate-500 text-xs italic">
+                                    لا توجد أهداف مراقبة لهذه القناة بعد. انقر على "هدف للقناة" لإضافة كلمات مفتاحية.
+                                  </div>
+                                ) : (
+                                  channelAutos.map((auto) => (
+                                    <div key={auto.id} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-700 transition-colors">
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold text-white text-xs">{auto.name}</span>
+                                          <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-mono text-xs font-bold">
+                                            {auto.trigger_value}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400">({auto.trigger_type})</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                                          <span>📦 {auto.reviews_count || 2} ريفيو</span>
+                                          <span>⏱️ تأخير: {auto.initial_delay_seconds || 5}ث / فاصل: {auto.delay_seconds || 4}ث</span>
+                                          <span>⚡ عدد مرات النشر: {auto.total_executions || 0}</span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 self-end sm:self-center">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleToggleAuto(auto.id)}
+                                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                                            auto.is_active
+                                              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                              : 'bg-slate-800 border-slate-700 text-slate-400'
+                                          }`}
+                                        >
+                                          {auto.is_active ? 'نشط 🟢' : 'معطل ⚪'}
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => startEditAutomation(auto)}
+                                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+                                          title="تعديل الهدف والكلمة"
+                                        >
+                                          <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteAuto(auto.id, auto.name)}
+                                          className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 transition-colors"
+                                          title="حذف الهدف"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </>
                   )}
                 </div>
               )}
 
+              {/* TAB 3: SECURITY & RESET */}
               {activeModalTab === 'security' && (
                 <div className="space-y-6">
                   <form onSubmit={handleResetPassword} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
