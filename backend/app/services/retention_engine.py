@@ -403,12 +403,17 @@ class RetentionEngine:
         first_name = case.member.first_name if case.member else "يا غالي"
         username = case.member.username if case.member else None
 
-        # Default empathetic, respectful recovery opener
+        # Default empathetic, respectful recovery opener (Owner In-Touch)
         default_template = (
-            f"مرحباً {first_name}، لاحظنا مغادرتك لقناة {channel.title} وحبينا نتطمن عليك 🌹\n"
-            f"هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة."
+            "السلام عليكم، أنا صاحب قناة {channel} 🌹 لاحظت خروجك من القناة وحبينا نتطمن عليك.\n"
+            "يا ريت نعرف السبب حتى نحسن من أداء القناة؟"
         )
-        outbound_text = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
+
+        outbound_text = template.replace("{name}", first_name or "يا غالي")\
+                                .replace("{channel}", channel.title)\
+                                .replace("{invite_link}", invite_url)
 
         # Attempt sending via UserbotPool with access_hash if available
         access_hash = None

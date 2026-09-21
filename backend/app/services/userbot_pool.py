@@ -16,6 +16,7 @@ from telethon.errors import (
     RPCError
 )
 from backend.app.services.telegram_service import telegram_service
+from backend.app.core.config import settings
 
 logger = logging.getLogger("reviewflow.userbot_pool")
 
@@ -75,9 +76,12 @@ class UserbotPool:
     """
     def __init__(self):
         self.sessions: List[UserbotSession] = [
-            UserbotSession("primary", telegram_service.ensure_connected, max_daily_contacts=35),
-            UserbotSession("backup", telegram_service.get_backup_client, max_daily_contacts=30)
+            UserbotSession("primary", telegram_service.ensure_connected, max_daily_contacts=35)
         ]
+        if getattr(settings, 'TELEGRAM_BACKUP_STRING_SESSION', None):
+            self.sessions.append(
+                UserbotSession("backup", telegram_service.get_backup_client, max_daily_contacts=30)
+            )
         self._inbound_handlers: List[Callable[[Any, TelegramClient, str], Any]] = []
         self._listeners_registered = False
 
@@ -121,17 +125,18 @@ class UserbotPool:
         # 1. Try preferred session first if healthy and capable
         if preferred:
             for s in self.sessions:
-                if s.name == preferred:
+                if (s.name == preferred or s.username == preferred) and s.is_healthy:
                     ok, _ = s.can_send_contact()
-                    if ok and s.is_healthy:
+                    if ok:
                         return s
 
         # 2. Pick any ready session with lowest daily count for load balancing
         ready_sessions = []
         for s in self.sessions:
-            ok, _ = s.can_send_contact()
-            if ok and s.is_healthy:
-                ready_sessions.append(s)
+            if s.is_healthy:
+                ok, _ = s.can_send_contact()
+                if ok:
+                    ready_sessions.append(s)
 
         if not ready_sessions:
             return None
@@ -159,15 +164,21 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "ALL_SESSIONS_BUSY_OR_LIMIT_REACHED",
+                "error_ar": "حساب اليوزربوت في فترة انتظار حالياً أو استنفد الحد اليومي. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة.",
                 "can_retry": True,
                 "retry_delay_seconds": 1800
             }
 
         client = await session.get_client()
         if not client:
+            session.is_healthy = False
+            alternate = [s for s in self.sessions if s != session and s.is_healthy and time.time() >= s.cooldown_until]
+            if alternate:
+                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
             return {
                 "success": False,
                 "error": "CLIENT_DISCONNECTED",
+                "error_ar": "تعذر الاتصال بحساب اليوزربوت حالياً. يمكنك استخدام زر تيليجرام ↗ للمراسلة الفورية من حسابك.",
                 "can_retry": True,
                 "retry_delay_seconds": 60
             }
@@ -213,6 +224,7 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "USER_PRIVACY_RESTRICTED",
+                "error_ar": "إعدادات خصوصية هذا المستخدم تمنع استقبال الرسائل من غير جهات الاتصال لديه.",
                 "uncontactable_reason": "PRIVACY_RESTRICTED",
                 "can_retry": False
             }
@@ -222,6 +234,7 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "NOT_MUTUAL_CONTACT",
+                "error_ar": "المستخدم يشترط أن تكون جهة اتصال متبادلة لمراسلته.",
                 "uncontactable_reason": "NOT_MUTUAL_CONTACT",
                 "can_retry": False
             }
@@ -231,25 +244,26 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "USER_BLOCKED_OR_DELETED",
+                "error_ar": "حساب هذا المستخدم محذوف أو قام بحظر البوت.",
                 "uncontactable_reason": "USER_BLOCKED_OR_DELETED",
                 "can_retry": False
             }
 
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Initiating 20m cooldown.")
+            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Initiating cooldown.")
             session.cooldown_until = time.time() + 1200
-            session.is_healthy = False
             session.last_error = "PeerFloodError"
 
-            # Failover to secondary session if available
-            alternate = [s for s in self.sessions if s != session and s.is_healthy]
+            # Failover to secondary session if healthy
+            alternate = [s for s in self.sessions if s != session and s.is_healthy and time.time() >= s.cooldown_until]
             if alternate:
                 logger.info(f"[🔄 Failover]: Re-attempting via alternate session {alternate[0].name}...")
                 return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
 
             return {
                 "success": False,
-                "error": "PEER_FLOOD_ALL_SESSIONS",
+                "error": "PEER_FLOOD",
+                "error_ar": "حساب اليوزربوت مقيد مؤقتاً من تيليجرام لمراسلة غير جهات الاتصال (PeerFlood). يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة من حسابك.",
                 "can_retry": True,
                 "retry_delay_seconds": 1200
             }
@@ -259,13 +273,14 @@ class UserbotPool:
             logger.warning(f"[⏳ FloodWait]: Session {session.name} hit FloodWait for {wait_time}s.")
             session.cooldown_until = time.time() + wait_time
 
-            alternate = [s for s in self.sessions if s != session and s.is_healthy]
+            alternate = [s for s in self.sessions if s != session and s.is_healthy and time.time() >= s.cooldown_until]
             if alternate:
                 return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
 
             return {
                 "success": False,
                 "error": f"FLOOD_WAIT_{wait_time}",
+                "error_ar": f"طلب تيليجرام الانتظار {wait_time} ثانية قبل إرسال رسائل جديدة.",
                 "can_retry": True,
                 "retry_after": wait_time,
                 "retry_delay_seconds": wait_time
@@ -276,21 +291,65 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": str(err),
+                "error_ar": f"خطأ أثناء الإرسال: {str(err)}",
                 "can_retry": True,
                 "retry_delay_seconds": 300
             }
+
+    async def get_userbot_avatar(self, session_name: str = "primary") -> Optional[bytes]:
+        """Downloads and returns profile picture bytes for the requested userbot session."""
+        session = next((s for s in self.sessions if s.name == session_name), None)
+        if not session:
+            return None
+        client = await session.get_client()
+        if not client:
+            return None
+        try:
+            return await client.download_profile_photo('me', bytes)
+        except Exception as e:
+            logger.error(f"Error fetching avatar for {session_name}: {e}")
+            return None
+
+    async def update_userbot_avatar(self, session_name: str, file_bytes: bytes, filename: str = "avatar.jpg") -> bool:
+        """Uploads a new profile picture to Telegram for the userbot session."""
+        session = next((s for s in self.sessions if s.name == session_name), None)
+        if not session:
+            return False
+        client = await session.get_client()
+        if not client:
+            return False
+        try:
+            from telethon.tl.functions.photos import UploadProfilePhotoRequest
+            import io
+            buf = io.BytesIO(file_bytes)
+            buf.name = filename
+            uploaded = await client.upload_file(buf)
+            await client(UploadProfilePhotoRequest(fallback=False, file=uploaded))
+            logger.info(f"[✓ Avatar Updated]: Successfully changed Telegram profile photo for session '{session_name}'.")
+            return True
+        except Exception as e:
+            logger.error(f"[!] Error updating avatar for {session_name}: {e}", exc_info=True)
+            raise e
 
     async def get_pool_status(self) -> List[Dict[str, Any]]:
         """Returns health, quota, and identity metrics for all userbot sessions."""
         status_list = []
         for s in self.sessions:
             s._refresh_daily_quota()
-            await s.get_client()
+            client = await s.get_client()
+            has_photo = False
+            if client:
+                try:
+                    me = await client.get_me()
+                    has_photo = bool(getattr(me, 'photo', None))
+                except Exception:
+                    pass
             status_list.append({
                 "name": s.name,
                 "username": s.username or "Unknown",
                 "user_id": s.user_id,
                 "is_healthy": s.is_healthy,
+                "has_photo": has_photo,
                 "daily_contacts_sent": s.daily_contacts_count,
                 "max_daily_contacts": s.max_daily_contacts,
                 "in_cooldown": time.time() < s.cooldown_until,

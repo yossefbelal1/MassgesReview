@@ -1,6 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_
 
@@ -284,9 +284,10 @@ async def send_manual_case_message(
     )
 
     if not res["success"]:
+        detail_msg = res.get("error_ar") or f"فشل إرسال الرسالة: {res.get('error', 'Unknown error')}"
         raise HTTPException(
             status_code=400,
-            detail=f"فشل إرسال الرسالة: {res.get('error', 'Unknown error')}"
+            detail=detail_msg
         )
 
     now = datetime.now(timezone.utc)
@@ -461,3 +462,42 @@ async def get_userbots_status(
     Returns real-time operational status, quotas, and health for the Userbot pool.
     """
     return await userbot_pool.get_pool_status()
+
+
+@router.get("/userbots/{session_name}/avatar")
+async def get_userbot_avatar(
+    session_name: str
+):
+    """
+    Fetches and serves the profile picture of the userbot directly from Telegram.
+    """
+    photo_bytes = await userbot_pool.get_userbot_avatar(session_name)
+    if not photo_bytes:
+        raise HTTPException(status_code=404, detail="لا توجد صورة بروفايل محددة لهذا الحساب")
+    return Response(content=photo_bytes, media_type="image/jpeg")
+
+
+@router.post("/userbots/{session_name}/avatar")
+async def update_userbot_avatar(
+    session_name: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Uploads a new profile picture to Telegram for the specified userbot.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="يرجى رفع ملف صورة صالح (JPEG أو PNG)")
+
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)")
+
+    try:
+        success = await userbot_pool.update_userbot_avatar(session_name, contents, filename=file.filename or "avatar.jpg")
+        if not success:
+            raise HTTPException(status_code=500, detail="فشل تحديث الصورة عبر تيليجرام")
+        return {"success": True, "message": "تم تحديث صورة بروفايل اليوزربوت على تيليجرام بنجاح! 🎉"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"خطأ أثناء رفع الصورة لتيليجرام: {str(e)}")
+

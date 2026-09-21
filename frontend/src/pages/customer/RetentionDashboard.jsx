@@ -3,8 +3,40 @@ import apiClient from '../../api/client';
 import { 
   UserCheck, Users, RefreshCw, MessageSquare, ShieldAlert, CheckCircle2, 
   Clock, Sparkles, Filter, Search, ArrowUpRight, Send, AlertCircle, 
-  Settings, BarChart3, Bot, ChevronLeft, X, ExternalLink, Radio, MessageCircle
+  Settings, BarChart3, Bot, ChevronLeft, X, ExternalLink, Radio, MessageCircle,
+  Camera, Upload, Eye, Check, Copy
 } from 'lucide-react';
+
+const WINBACK_TEMPLATES = [
+  {
+    id: 'owner_in_touch',
+    title: 'صاحب القناة (ودود واستفسار وتطوير) ⭐ موصى به',
+    badge: 'الأعلى تفاعلاً',
+    desc: 'رسالة شخصية من صاحب القناة للاطمئنان على العضو ومعرفة سبب الخروج لتحسين القناة',
+    text: 'السلام عليكم، أنا صاحب قناة {channel} 🌹 لاحظت خروجك من القناة وحبينا نتطمن عليك.\nيا ريت نعرف السبب حتى نحسن من أداء القناة؟'
+  },
+  {
+    id: 'mistake_rejoin',
+    title: 'مغادرة بالخطأ ورابط العودة السريعة',
+    badge: 'استرداد فوري',
+    desc: 'للأعضاء الذين يغادرون بالخطأ ويرغبون برابط عودة سريع ومباشر',
+    text: 'أهلاً بك يا {name} 🌹 لاحظنا خروجك من قناة {channel}، إذا كان الخروج بالخطأ تقدر ترجع من خلال الرابط التالي:\n{invite_link}\nيسعدنا دائماً وجودك معنا!'
+  },
+  {
+    id: 'content_feedback',
+    title: 'استطلاع رأي المحتوى والإعلانات',
+    badge: 'فهم الأسباب',
+    desc: 'سؤال مباشر لمعرفة هل كثرة الإشعارات أو عدم ملاءمة المحتوى سبب الخروج',
+    text: 'مرحباً يا {name} 🌟 يهمنا جداً رأيك، لاحظنا مغادرتك لـ {channel}، حابين نعرف هل المحتوى لم يناسبك أم الإعلانات والإشعارات كانت مزعجة؟ رأيك يساعدنا على التطوير 💡'
+  },
+  {
+    id: 'exclusive_content',
+    title: 'ميزات وتحديثات حصرية قادمة',
+    badge: 'تحفيز العودة',
+    desc: 'إشعار العضو بأن هناك صفقات ومحتوى حصري قادم تم إعداده خصيصاً',
+    text: 'أهلاً {name} 🎁 بصفتك عضواً في {channel}، جهزنا محتوى وتحديثات حصرية هذا الأسبوع وحبينا نتطمن عليك. هل تحب نرسل لك رابط العودة؟'
+  }
+];
 
 export default function RetentionDashboard({ onNavigate }) {
   const [channels, setChannels] = useState([]);
@@ -28,6 +60,10 @@ export default function RetentionDashboard({ onNavigate }) {
   const [modalLoading, setModalLoading] = useState(false);
   const [manualText, setManualText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+
+  // Avatar upload state
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
 
   // Settings Form State
   const [savingSettings, setSavingSettings] = useState(false);
@@ -117,6 +153,64 @@ export default function RetentionDashboard({ onNavigate }) {
     }
   };
 
+  const handleAvatarUpload = async (sessionName, e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('يرجى اختيار ملف صورة صالح (JPEG أو PNG)');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      setUploadingAvatar(true);
+      const res = await apiClient.post(`/retention/userbots/${sessionName}/avatar`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      alert(res.data?.message || 'تم تحديث صورة بروفايل اليوزربوت على تيليجرام بنجاح! 🎉');
+      setAvatarTimestamp(Date.now());
+      const botRes = await apiClient.get('/retention/userbots');
+      setUserbots(botRes.data);
+    } catch (err) {
+      alert('فشل رفع الصورة: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const insertTag = (tag) => {
+    setSettingsForm(prev => {
+      const current = prev.recovery_first_message_template || '';
+      return {
+        ...prev,
+        recovery_first_message_template: current ? `${current} ${tag}` : tag
+      };
+    });
+  };
+
+  const getSelectedChannelTitle = () => {
+    const ch = channels.find(c => c.id === selectedChannelId);
+    return ch ? ch.title : 'قناتك';
+  };
+
+  const getLivePreviewText = () => {
+    const raw = settingsForm.recovery_first_message_template || WINBACK_TEMPLATES[0].text;
+    const title = getSelectedChannelTitle();
+    const link = settingsForm.invite_link || 'https://t.me/+AbCdEfGhIjKlMn';
+    return raw
+      .replace(/{channel}/g, title)
+      .replace(/{name}/g, 'أحمد')
+      .replace(/{invite_link}/g, link);
+  };
+
   const handleSendManualMessage = async (e) => {
     e.preventDefault();
     if (!selectedCase || !manualText.trim()) return;
@@ -129,7 +223,7 @@ export default function RetentionDashboard({ onNavigate }) {
       setCaseMessages(prev => [...prev, res.data]);
       setManualText('');
       setSelectedCase(prev => ({ ...prev, status: 'CONVERSATION_ACTIVE', contactable: true }));
-      fetchAllData();
+      fetchData();
     } catch (err) {
       alert(err.response?.data?.detail || 'فشل إرسال الرسالة');
     } finally {
@@ -143,7 +237,7 @@ export default function RetentionDashboard({ onNavigate }) {
       if (selectedCase && selectedCase.id === caseId) {
         setSelectedCase(prev => ({ ...prev, status: 'SCHEDULED', contactable: true }));
       }
-      fetchAllData();
+      fetchData();
     } catch (err) {
       alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
     }
@@ -154,7 +248,7 @@ export default function RetentionDashboard({ onNavigate }) {
       setLoading(true);
       const res = await apiClient.post('/retention/cases/reset-all');
       alert(res.data?.message || 'تمت إعادة جدولة الحالات بنجاح.');
-      fetchAllData();
+      fetchData();
     } catch (err) {
       alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
     } finally {
@@ -704,18 +798,125 @@ export default function RetentionDashboard({ onNavigate }) {
               <p className="text-[10px] text-slate-400 mt-1">يتم إرساله آلياً للعضو إذا أفاد بمغادرته بالخطأ أو طلب الرابط.</p>
             </div>
 
-            {/* Recovery Message Template */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                نص رسالة الاسترداد الأولى المخصصة (افتراضي مريح وودود)
+            {/* Ready-made Win-back Templates Selection */}
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-slate-300">
+                قوالب استرداد جاهزة ومجرّبة (اضغط لاختيار وتطبيق القالب مباشرة)
               </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {WINBACK_TEMPLATES.map((tmpl) => {
+                  const isSelected = settingsForm.recovery_first_message_template === tmpl.text;
+                  return (
+                    <div
+                      key={tmpl.id}
+                      onClick={() => setSettingsForm({ ...settingsForm, recovery_first_message_template: tmpl.text })}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all text-right flex flex-col justify-between ${
+                        isSelected
+                          ? 'bg-emerald-500/10 border-emerald-500 text-white shadow-sm'
+                          : 'bg-slate-950 border-slate-800/80 hover:border-slate-700 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className="font-bold text-xs">{tmpl.title}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                          isSelected ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {tmpl.badge}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">{tmpl.desc}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Recovery Message Template with Dynamic Tags */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="block text-xs font-semibold text-slate-300">
+                  نص رسالة الاسترداد الأولى المخصصة
+                </label>
+                {/* Dynamic Variables Chips */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-500 font-semibold">إدراج متغير:</span>
+                  <button
+                    type="button"
+                    onClick={() => insertTag('{channel}')}
+                    className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[10px] font-mono border border-emerald-500/20 transition-colors"
+                    title="يتم استبداله باسم القناة تلقائياً"
+                  >
+                    + {'{channel}'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertTag('{name}')}
+                    className="px-2 py-0.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 text-[10px] font-mono border border-blue-500/20 transition-colors"
+                    title="يتم استبداله باسم العضو أو 'يا غالي'"
+                  >
+                    + {'{name}'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => insertTag('{invite_link}')}
+                    className="px-2 py-0.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-[10px] font-mono border border-purple-500/20 transition-colors"
+                    title="يتم استبداله برابط القناة المخصص للعودة"
+                  >
+                    + {'{invite_link}'}
+                  </button>
+                </div>
+              </div>
+
               <textarea
-                rows={3}
-                placeholder="مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك..."
+                rows={4}
+                placeholder="اكتب رسالة الاسترداد المخصصة هنا، يمكنك استخدام {channel} و {name} و {invite_link}..."
                 value={settingsForm.recovery_first_message_template}
                 onChange={(e) => setSettingsForm({ ...settingsForm, recovery_first_message_template: e.target.value })}
-                className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500 leading-relaxed"
+                className="w-full p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500 leading-relaxed font-sans"
               />
+
+              {/* Live Telegram Chat Bubble Preview */}
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-semibold flex items-center gap-1.5 text-slate-300">
+                    <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>معاينة حية لشكل الرسالة في تيليجرام (كما يراها العضو المغادر)</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full font-mono">
+                    Telegram Preview
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xs shrink-0 overflow-hidden">
+                    {userbots[0]?.has_photo ? (
+                      <img 
+                        src={`/api/v1/retention/userbots/${userbots[0]?.name || 'primary'}/avatar?t=${avatarTimestamp}`} 
+                        alt="Bot" 
+                        className="w-full h-full object-cover" 
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <span>🤖</span>
+                    )}
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-white">
+                        {userbots[0]?.username ? `@${userbots[0].username}` : 'حساب اليوزربوت'}
+                      </span>
+                      <span className="text-[9px] text-emerald-400">متصل الآن</span>
+                    </div>
+                    <div className="p-3 rounded-2xl rounded-tr-none bg-slate-800/90 text-slate-100 text-xs leading-relaxed whitespace-pre-wrap shadow-sm">
+                      {getLivePreviewText()}
+                      <div className="mt-1 flex items-center justify-end gap-1 text-[9px] text-slate-400 font-mono">
+                        <span>{new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <Check className="w-3 h-3 text-emerald-400 inline" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Welcome Flow Toggle */}
@@ -776,25 +977,66 @@ export default function RetentionDashboard({ onNavigate }) {
         </form>
       )}
 
-      {/* ── TAB 5: USERBOT POOL HEALTH ────────────────────────────────────── */}
+      {/* ── TAB 5: USERBOT POOL HEALTH & AVATARS ──────────────────────────── */}
       {activeTab === 'userbots' && (
-        <div className="space-y-3 max-w-2xl">
-          <div className="p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm">
-            <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-3">
-              <Bot className="w-4 h-4 text-emerald-400" />
-              <span>أسطول حسابات اليوزربوت المتصلة (Unified Userbot Pool)</span>
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              يعمل النظام بنظام الحسابات المتعددة (Failover Pool). يدير النظام التناوب بين الحسابات آلياً لضمان عدم توقف المراسلة.
-            </p>
+        <div className="space-y-4 max-w-3xl">
+          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Bot className="w-4 h-4 text-emerald-400" />
+                <span>أسطول حسابات اليوزربوت وصورة البروفايل (Userbot Fleet & Profile)</span>
+              </h3>
+              <span className="text-xs text-slate-400">
+                {userbots.filter(b => b.is_healthy).length} من أصل {userbots.length} متصل
+              </span>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 leading-relaxed flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+              <div>
+                <strong className="block font-bold mb-0.5">نصيحة ذهبية لزيادة معدل الرد والاسترداد:</strong>
+                <span>
+                  قم برفع صورة بروفايل جذابة لليوزربوت (مثل لوجو قناتك أو صورة ممثل خدمة عملاء ودود). الحسابات التي تملك صورة واسم واضح تحقق تفاعلاً واسترداداً أعلى بنسبة تتجاوز 40%!
+                </span>
+              </div>
+            </div>
 
             <div className="space-y-3">
               {userbots.map((b, i) => (
-                <div key={i} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold">
-                      {i + 1}
+                <div key={i} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    {/* Userbot Avatar with Upload overlay */}
+                    <div className="relative group w-12 h-12 rounded-2xl overflow-hidden bg-slate-900 border-2 border-emerald-500/30 flex items-center justify-center shrink-0 shadow-inner">
+                      {b.has_photo ? (
+                        <img
+                          src={`/api/v1/retention/userbots/${b.name}/avatar?t=${avatarTimestamp}`}
+                          alt={b.username}
+                          className="w-full h-full object-cover"
+                          onError={(e) => { e.target.style.display = 'none'; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs font-bold bg-slate-900">
+                          <Bot className="w-5 h-5 text-emerald-400 mb-0.5" />
+                          <span className="text-[9px] font-mono">@{b.username ? b.username.slice(0, 4) : 'bot'}</span>
+                        </div>
+                      )}
+                      {/* Hover Upload Overlay */}
+                      <label 
+                        className="absolute inset-0 bg-slate-950/80 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[9px] text-white cursor-pointer transition-opacity font-semibold"
+                        title="اضغط لرفع صورة بروفايل جديدة لهذا الحساب على تيليجرام"
+                      >
+                        <Camera className="w-4 h-4 text-emerald-400 mb-0.5" />
+                        <span>تغيير</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          disabled={uploadingAvatar}
+                          onChange={(e) => handleAvatarUpload(b.name, e)}
+                        />
+                      </label>
                     </div>
+
                     <div>
                       <h4 className="text-xs font-bold text-white flex items-center gap-2">
                         <span>@{b.username}</span>
@@ -802,17 +1044,38 @@ export default function RetentionDashboard({ onNavigate }) {
                           {b.name === 'primary' ? 'الحساب الأساسي' : 'حساب الطوارئ والاحتياط'}
                         </span>
                       </h4>
-                      <span className="text-[11px] text-slate-400">
-                        تم إرسال {b.daily_contacts_sent} من أصل {b.max_daily_contacts} رسالة اليوم
-                      </span>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[11px] text-slate-400">
+                          تم إرسال {b.daily_contacts_sent} من أصل {b.max_daily_contacts} رسالة اليوم
+                        </span>
+                        {b.in_cooldown && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-semibold">
+                            في فترة انتظار مؤقتة
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                    b.is_healthy ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                  }`}>
-                    {b.is_healthy ? 'نشط ومتصل 🟢' : 'يحتاج فحص 🔴'}
-                  </span>
+                  <div className="flex items-center gap-2 self-end sm:self-center">
+                    <label className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 border border-slate-700">
+                      <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{uploadingAvatar ? 'جاري الرفع...' : 'تغيير الصورة 📷'}</span>
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        disabled={uploadingAvatar}
+                        onChange={(e) => handleAvatarUpload(b.name, e)}
+                      />
+                    </label>
+
+                    <span className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
+                      b.is_healthy ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    }`}>
+                      {b.is_healthy ? 'متصل 🟢' : 'يحتاج فحص 🔴'}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -929,26 +1192,33 @@ export default function RetentionDashboard({ onNavigate }) {
             </div>
 
             {/* Quick Templates */}
-            <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800/60 flex items-center gap-1.5 overflow-x-auto text-[10px]">
-              <span className="text-slate-500 font-semibold whitespace-nowrap">قوالب:</span>
+            <div className="px-3 py-2 bg-slate-950/90 border-t border-slate-800/60 flex items-center gap-1.5 overflow-x-auto text-[10px]">
+              <span className="text-slate-500 font-semibold whitespace-nowrap">قوالب جاهزة:</span>
               <button
                 type="button"
-                onClick={() => setManualText("مرحباً يا غالي، لاحظنا مغادرتك للقناة وحبينا نتطمن عليك 🌹 هل خرجت بالخطأ؟")}
-                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+                onClick={() => setManualText(`السلام عليكم، أنا صاحب قناة ${selectedCase?.channel_title || 'القناة'} 🌹 لاحظت خروجك وحبينا نتطمن عليك. يا ريت نعرف السبب حتى نحسن من أداء القناة؟`)}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 whitespace-nowrap transition-colors font-bold"
+              >
+                صاحب القناة 🌹
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualText(`مرحباً يا ${selectedCase?.user_full_name ? selectedCase.user_full_name.split(' ')[0] : 'غالي'}، لاحظنا مغادرتك لقناة ${selectedCase?.channel_title || 'القناة'} وحبينا نتطمن عليك 🌹 هل خرجت بالخطأ؟`)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
               >
                 مغادرة بالخطأ 🌹
               </button>
               <button
                 type="button"
-                onClick={() => setManualText("أهلاً بك، تفضل رابط العودة المباشر للقناة: ")}
-                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+                onClick={() => setManualText(`أهلاً بك، تفضل رابط العودة المباشر للقناة:\n${settings?.invite_link || ''}`)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
               >
                 رابط العودة 🔗
               </button>
               <button
                 type="button"
-                onClick={() => setManualText("مرحباً، يسعدنا سماع رأيك أو أي اقتراح لتطوير محتوى القناة لتناسبك أكثر 💡")}
-                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+                onClick={() => setManualText(`مرحباً يا ${selectedCase?.user_full_name ? selectedCase.user_full_name.split(' ')[0] : 'غالي'}، يسعدنا سماع رأيك أو أي اقتراح لتطوير محتوى قناة ${selectedCase?.channel_title || 'القناة'} لتناسبك أكثر 💡`)}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
               >
                 استفسار واقتراح 💡
               </button>
