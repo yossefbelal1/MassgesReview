@@ -258,6 +258,17 @@ class RetentionEngine:
         if existing_case:
             return
 
+        # Check if member already has an open or active recovery case for this channel
+        open_case = db.query(RecoveryCase).filter(
+            RecoveryCase.channel_id == channel.id,
+            RecoveryCase.telegram_user_id == telegram_user_id,
+            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"])
+        ).first()
+
+        if open_case:
+            logger.info(f"Skipping duplicate case: User {telegram_user_id} already has active case {open_case.id} [{open_case.status}]")
+            return
+
         # Check if member permanently opted out
         if member.status == "OPT_OUT":
             logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
@@ -422,6 +433,19 @@ class RetentionEngine:
             ChannelUserbot.is_active == True
         ).first()
 
+        # Cross-channel safety check: prevent bombarding the same user across different channels if using shared userbot
+        if not has_dedicated:
+            recent_msg = db.query(RecoveryMessage).join(RecoveryCase).filter(
+                RecoveryCase.telegram_user_id == case.telegram_user_id,
+                RecoveryMessage.direction == "OUTBOUND",
+                RecoveryMessage.sent_at >= now - timedelta(minutes=15)
+            ).first()
+            if recent_msg:
+                case.scheduled_contact_at = now + timedelta(minutes=15)
+                db.commit()
+                logger.info(f"[⏸️ Cross-Channel Pacing]: User {case.telegram_user_id} was recently messaged for another channel. Deferred 15m.")
+                return {"success": False, "error": "USER_RECENTLY_MESSAGED_CROSS_CHANNEL", "can_retry": True, "retry_delay_seconds": 900}
+
         if has_dedicated:
             res = await dedicated_userbot_service.send_direct_message_for_channel(
                 db=db,
@@ -504,7 +528,11 @@ class RetentionEngine:
             return
 
         for case in pending_cases:
-            await self.send_recovery_to_case(db, case)
+            res = await self.send_recovery_to_case(db, case)
+            # If all sessions are busy or in cooldown, pause remaining batch until next cycle
+            if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "PEER_FLOOD", "CLIENT_DISCONNECTED"]:
+                logger.info("[⏸️ Batch Paused]: Outbound sessions cooling down or busy. Pausing batch.")
+                break
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

@@ -160,13 +160,16 @@ class UserbotPool:
         """
         session = self.select_best_session(preferred_session)
         if not session:
-            logger.warning("[⚠️ UserbotPool]: No active userbot session has available daily quota or all are in cooldown.")
+            now = time.time()
+            cooldowns = [s.cooldown_until - now for s in self.sessions if s.cooldown_until > now]
+            wait_rem = int(max(cooldowns)) if cooldowns else 60
+            logger.info(f"[⚠️ UserbotPool]: All sessions busy or in cooldown ({wait_rem}s remaining).")
             return {
                 "success": False,
                 "error": "ALL_SESSIONS_BUSY_OR_LIMIT_REACHED",
-                "error_ar": "حساب اليوزربوت في فترة انتظار حالياً أو استنفد الحد اليومي. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة.",
+                "error_ar": f"حساب اليوزربوت في فترة انتظار مؤقتة ({wait_rem} ثانية) أو استنفد حده اليومي. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة.",
                 "can_retry": True,
-                "retry_delay_seconds": 120
+                "retry_delay_seconds": max(30, wait_rem)
             }
 
         client = await session.get_client()
