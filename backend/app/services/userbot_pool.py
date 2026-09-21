@@ -78,7 +78,7 @@ class UserbotPool:
         self.sessions: List[UserbotSession] = [
             UserbotSession("primary", telegram_service.ensure_connected, max_daily_contacts=35)
         ]
-        if getattr(settings, 'TELEGRAM_BACKUP_STRING_SESSION', None):
+        if getattr(settings, 'TELEGRAM_BACKUP_STRING_SESSION', None) and str(settings.TELEGRAM_BACKUP_STRING_SESSION).strip():
             self.sessions.append(
                 UserbotSession("backup", telegram_service.get_backup_client, max_daily_contacts=30)
             )
