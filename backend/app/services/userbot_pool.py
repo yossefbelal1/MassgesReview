@@ -145,7 +145,8 @@ class UserbotPool:
         target_user_id: int,
         text: str,
         channel_id: Optional[str] = None,
-        preferred_session: Optional[str] = None
+        preferred_session: Optional[str] = None,
+        target_username: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Sends a direct private message to a Telegram user.
@@ -153,12 +154,12 @@ class UserbotPool:
         """
         session = self.select_best_session(preferred_session)
         if not session:
-            logger.warning("[⚠️ UserbotPool]: No active userbot session has available daily quota.")
+            logger.warning("[⚠️ UserbotPool]: No active userbot session has available daily quota or all are in cooldown.")
             return {
                 "success": False,
                 "error": "ALL_SESSIONS_BUSY_OR_LIMIT_REACHED",
-                "uncontactable_reason": "DAILY_LIMIT_REACHED",
-                "can_retry": True
+                "can_retry": True,
+                "retry_delay_seconds": 1800
             }
 
         client = await session.get_client()
@@ -166,25 +167,33 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "CLIENT_DISCONNECTED",
-                "can_retry": True
+                "can_retry": True,
+                "retry_delay_seconds": 60
             }
 
-        # Anti-spam safety jitter delay (2-4 seconds)
+        # Anti-spam safety spacing (8-14s between cold outreach)
         now = time.time()
         elapsed_since_last = now - session.last_message_sent_at
-        if elapsed_since_last < 2.5:
-            await asyncio.sleep(random.uniform(2.0, 3.5))
+        if elapsed_since_last < 10.0:
+            await asyncio.sleep(random.uniform(8.0, 14.0))
 
         try:
-            # Resolve entity & send message
-            sent_msg = await client.send_message(target_user_id, text)
+            # Resolve entity: prefer username if available, else target_user_id
+            target = target_username if target_username else target_user_id
+            try:
+                entity = await client.get_entity(target)
+            except Exception:
+                entity = target_user_id
+
+            # Send message
+            sent_msg = await client.send_message(entity, text)
             session.daily_contacts_count += 1
             session.last_message_sent_at = time.time()
             session.is_healthy = True
             session.last_error = None
 
             bot_display = session.username or session.name
-            logger.info(f"[🚀 Userbot Outbound ({bot_display})]: Sent recovery message to user {target_user_id}")
+            logger.info(f"[🚀 Userbot Outbound ({bot_display})]: Sent recovery message to user {target_user_id} (@{target_username or 'no_user'})")
             return {
                 "success": True,
                 "session_name": session.name,
@@ -221,8 +230,8 @@ class UserbotPool:
             }
 
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Initiating 1h cooldown.")
-            session.cooldown_until = time.time() + 3600
+            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Initiating 20m cooldown.")
+            session.cooldown_until = time.time() + 1200
             session.is_healthy = False
             session.last_error = "PeerFloodError"
 
@@ -230,13 +239,13 @@ class UserbotPool:
             alternate = [s for s in self.sessions if s != session and s.is_healthy]
             if alternate:
                 logger.info(f"[🔄 Failover]: Re-attempting via alternate session {alternate[0].name}...")
-                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name)
+                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username)
 
             return {
                 "success": False,
                 "error": "PEER_FLOOD_ALL_SESSIONS",
-                "uncontactable_reason": "PEER_FLOOD",
-                "can_retry": True
+                "can_retry": True,
+                "retry_delay_seconds": 1200
             }
 
         except FloodWaitError as fwe:
@@ -246,13 +255,14 @@ class UserbotPool:
 
             alternate = [s for s in self.sessions if s != session and s.is_healthy]
             if alternate:
-                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name)
+                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username)
 
             return {
                 "success": False,
                 "error": f"FLOOD_WAIT_{wait_time}",
                 "can_retry": True,
-                "retry_after": wait_time
+                "retry_after": wait_time,
+                "retry_delay_seconds": wait_time
             }
 
         except Exception as err:
@@ -260,7 +270,8 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": str(err),
-                "can_retry": True
+                "can_retry": True,
+                "retry_delay_seconds": 300
             }
 
     async def get_pool_status(self) -> List[Dict[str, Any]]:

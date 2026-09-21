@@ -128,10 +128,37 @@ export default function RetentionDashboard({ onNavigate }) {
       });
       setCaseMessages(prev => [...prev, res.data]);
       setManualText('');
+      setSelectedCase(prev => ({ ...prev, status: 'CONVERSATION_ACTIVE', contactable: true }));
+      fetchAllData();
     } catch (err) {
       alert(err.response?.data?.detail || 'فشل إرسال الرسالة');
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  const handleRetryCase = async (caseId) => {
+    try {
+      await apiClient.post(`/retention/cases/${caseId}/retry`);
+      if (selectedCase && selectedCase.id === caseId) {
+        setSelectedCase(prev => ({ ...prev, status: 'SCHEDULED', contactable: true }));
+      }
+      fetchAllData();
+    } catch (err) {
+      alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleResetAllUncontactable = async () => {
+    try {
+      setLoading(true);
+      const res = await apiClient.post('/retention/cases/reset-all');
+      alert(res.data?.message || 'تمت إعادة جدولة الحالات بنجاح.');
+      fetchAllData();
+    } catch (err) {
+      alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -352,6 +379,15 @@ export default function RetentionDashboard({ onNavigate }) {
               </select>
 
               <button
+                onClick={handleResetAllUncontactable}
+                className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap"
+                title="إعادة محاولة المراسلة لجميع الحالات العالقة"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>إعادة مراسلة غير المتواصل معهم</span>
+              </button>
+
+              <button
                 onClick={fetchData}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
                 title="تحديث"
@@ -430,13 +466,25 @@ export default function RetentionDashboard({ onNavigate }) {
                             {new Date(c.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
                           </td>
                           <td className="p-3.5 text-center">
-                            <button
-                              onClick={() => openCaseChat(c)}
-                              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold transition-all inline-flex items-center gap-1.5"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                              <span>المحادثة</span>
-                            </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => openCaseChat(c)}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold transition-all inline-flex items-center gap-1.5"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>المحادثة</span>
+                              </button>
+                              {c.status === 'UNCONTACTABLE' && (
+                                <button
+                                  onClick={() => handleRetryCase(c.id)}
+                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold border border-emerald-500/20 transition-all inline-flex items-center gap-1"
+                                  title="إعادة الجدولة والمراسلة"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>إعادة المحاولة</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -771,6 +819,16 @@ export default function RetentionDashboard({ onNavigate }) {
               </div>
 
               <div className="flex items-center gap-2">
+                {selectedCase.status === 'UNCONTACTABLE' && (
+                  <button
+                    type="button"
+                    onClick={() => handleRetryCase(selectedCase.id)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 text-[11px] font-bold border border-emerald-500/20 transition-all flex items-center gap-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>إعادة الجدولة</span>
+                  </button>
+                )}
                 {getStatusBadge(selectedCase.status)}
                 <button
                   onClick={() => setSelectedCase(null)}
@@ -787,7 +845,7 @@ export default function RetentionDashboard({ onNavigate }) {
                 <div className="p-8 text-center text-slate-400">جاري تحميل سجل المحادثة...</div>
               ) : caseMessages.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 italic">
-                  لم يتم تبادل أي رسائل بعد. الرسالة مجدولة للإرسال تلقائياً.
+                  لم يتم تبادل أي رسائل بعد. الرسالة مجدولة للإرسال تلقائياً أو يمكنك المراسلة يدوياً الآن بالأسفل.
                 </div>
               ) : (
                 caseMessages.map((msg) => {
@@ -832,15 +890,15 @@ export default function RetentionDashboard({ onNavigate }) {
             <form onSubmit={handleSendManualMessage} className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
               <input
                 type="text"
-                placeholder={selectedCase.contactable ? 'اكتب رداً مخصصاً للعضو...' : 'لا يمكن المراسلة بسبب قيود خصوصية العضو'}
-                disabled={!selectedCase.contactable || sendingMessage}
+                placeholder="اكتب رداً مخصصاً للعضو لإرساله عبر اليوزربوت..."
+                disabled={sendingMessage}
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
                 className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500 disabled:opacity-40"
               />
               <button
                 type="submit"
-                disabled={!selectedCase.contactable || sendingMessage || !manualText.trim()}
+                disabled={sendingMessage || !manualText.trim()}
                 className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-bold transition-all flex items-center gap-1.5"
               >
                 <Send className="w-3.5 h-3.5" />

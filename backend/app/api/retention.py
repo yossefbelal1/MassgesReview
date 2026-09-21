@@ -256,6 +256,7 @@ async def send_manual_case_message(
 ):
     """
     Sends a direct message from the userbot to the member in an active recovery case.
+    Allows manual intervention even if previously marked uncontactable.
     """
     case = db.query(RecoveryCase).filter(
         RecoveryCase.id == case_id,
@@ -263,26 +264,28 @@ async def send_manual_case_message(
     ).first()
 
     if not case:
-        raise HTTPException(status_code=404, detail="Recovery case not found")
+        raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
 
-    if not case.contactable:
-        raise HTTPException(status_code=400, detail="Member is marked as uncontactable due to privacy or block rules.")
+    username = case.member.username if case.member else None
 
     res = await userbot_pool.send_direct_message(
         target_user_id=int(case.telegram_user_id),
         text=payload.text,
         channel_id=case.channel_id,
-        preferred_session=case.assigned_userbot
+        preferred_session=case.assigned_userbot,
+        target_username=username
     )
 
     if not res["success"]:
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to send message: {res.get('error', 'Unknown error')}"
+            detail=f"فشل إرسال الرسالة: {res.get('error', 'Unknown error')}"
         )
 
     now = datetime.now(timezone.utc)
     case.status = "CONVERSATION_ACTIVE"
+    case.contactable = True
+    case.uncontactable_reason = None
     case.assigned_userbot = res["userbot_username"]
 
     msg = RecoveryMessage(
@@ -298,6 +301,59 @@ async def send_manual_case_message(
     db.refresh(msg)
 
     return msg
+
+
+@router.post("/cases/{case_id}/retry", response_model=RecoveryCaseOut)
+def retry_single_recovery_case(
+    case_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Resets a specific recovery case back to SCHEDULED for outreach.
+    """
+    case = db.query(RecoveryCase).filter(
+        RecoveryCase.id == case_id,
+        RecoveryCase.tenant_id == tenant_id
+    ).first()
+
+    if not case:
+        raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
+
+    case.status = "SCHEDULED"
+    case.contactable = True
+    case.uncontactable_reason = None
+    case.scheduled_contact_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(case)
+    return case
+
+
+@router.post("/cases/reset-all")
+def reset_all_uncontactable_cases(
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Resets all false UNCONTACTABLE cases back to SCHEDULED with staggered delays.
+    """
+    cases = db.query(RecoveryCase).filter(
+        RecoveryCase.tenant_id == tenant_id,
+        RecoveryCase.status == "UNCONTACTABLE"
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    for idx, c in enumerate(cases):
+        c.status = "SCHEDULED"
+        c.contactable = True
+        c.uncontactable_reason = None
+        # Stagger by 35 seconds to maintain anti-spam safety
+        c.scheduled_contact_at = now + timedelta(seconds=(idx * 35))
+
+    db.commit()
+    return {"reset_count": len(cases), "message": f"تمت إعادة جدولة {len(cases)} حالة بأمان بفارق زمني لتفادي الحظر."}
 
 
 @router.get("/members", response_model=List[AudienceMemberOut])

@@ -254,9 +254,30 @@ class RetentionEngine:
             logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
             return
 
-        # Schedule recovery contact
+        # Schedule recovery contact with safe staggering
+        now = datetime.now(timezone.utc)
         delay_sec = settings.initial_delay_seconds if settings.initial_delay_seconds is not None else 180
-        scheduled_at = event_date + timedelta(seconds=delay_sec)
+
+        # Check if leave happened in the past (e.g. historical admin log read)
+        is_historical = (now - event_date).total_seconds() > (48 * 3600)
+
+        if is_historical:
+            # Historical events are tracked in directory and cases but not auto-blasted
+            initial_status = "DETECTED"
+            scheduled_at = None
+        else:
+            initial_status = "SCHEDULED"
+            if event_date + timedelta(seconds=delay_sec) <= now:
+                # Distribute outreach so cases don't fire concurrently
+                from sqlalchemy import func
+                max_sched = db.query(func.max(RecoveryCase.scheduled_contact_at)).filter(
+                    RecoveryCase.channel_id == channel.id,
+                    RecoveryCase.status == "SCHEDULED"
+                ).scalar()
+                base_time = max(now, max_sched if max_sched else now)
+                scheduled_at = base_time + timedelta(seconds=30)
+            else:
+                scheduled_at = event_date + timedelta(seconds=delay_sec)
 
         case = RecoveryCase(
             tenant_id=channel.tenant_id,
@@ -264,14 +285,14 @@ class RetentionEngine:
             member_id=member.id,
             telegram_user_id=telegram_user_id,
             leave_event_id=leave_event_id,
-            status="SCHEDULED",
+            status=initial_status,
             contactable=True,
             scheduled_contact_at=scheduled_at,
             created_at=event_date
         )
         db.add(case)
         db.commit()
-        logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) scheduled for {scheduled_at}")
+        logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
 
     async def _handle_member_join(
         self,
@@ -350,65 +371,74 @@ class RetentionEngine:
     async def process_pending_recovery_contacts(self, db: Session):
         """
         Executes scheduled initial recovery contacts that are due.
+        Processes safely one case per loop with respectful anti-spam pacing.
         """
         now = datetime.now(timezone.utc)
-        pending_cases = db.query(RecoveryCase).filter(
+        pending_case = db.query(RecoveryCase).filter(
             RecoveryCase.status == "SCHEDULED",
             RecoveryCase.scheduled_contact_at <= now
-        ).limit(10).all()
+        ).order_by(RecoveryCase.scheduled_contact_at.asc()).first()
 
-        for case in pending_cases:
-            channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
-            if not channel:
-                continue
+        if not pending_case:
+            return
 
-            settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
-            first_name = case.member.first_name if case.member else "يا غالي"
+        case = pending_case
+        channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
+        if not channel:
+            return
 
-            # Default empathetic, respectful recovery opener
-            default_template = (
-                f"مرحباً {first_name}، لاحظنا مغادرتك لقناة {channel.title} وحبينا نتطمن عليك 🌹\n"
-                f"هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة."
-            )
-            outbound_text = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
+        first_name = case.member.first_name if case.member else "يا غالي"
+        username = case.member.username if case.member else None
 
-            # Attempt sending via UserbotPool
-            res = await userbot_pool.send_direct_message(
-                target_user_id=int(case.telegram_user_id),
+        # Default empathetic, respectful recovery opener
+        default_template = (
+            f"مرحباً {first_name}، لاحظنا مغادرتك لقناة {channel.title} وحبينا نتطمن عليك 🌹\n"
+            f"هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة."
+        )
+        outbound_text = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+
+        # Attempt sending via UserbotPool
+        res = await userbot_pool.send_direct_message(
+            target_user_id=int(case.telegram_user_id),
+            text=outbound_text,
+            channel_id=channel.id,
+            target_username=username
+        )
+
+        if res["success"]:
+            case.status = "CONTACTED"
+            case.contactable = True
+            case.assigned_userbot = res["userbot_username"]
+            case.first_contacted_at = now
+            case.uncontactable_reason = None
+
+            msg = RecoveryMessage(
+                case_id=case.id,
+                direction="OUTBOUND",
+                sender_type="USERBOT",
+                userbot_username=res["userbot_username"],
                 text=outbound_text,
-                channel_id=channel.id
+                sent_at=now
             )
+            db.add(msg)
+            db.commit()
+            logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
 
-            if res["success"]:
-                case.status = "CONTACTED"
-                case.assigned_userbot = res["userbot_username"]
-                case.first_contacted_at = now
+        elif res.get("uncontactable_reason") and not res.get("can_retry", True):
+            # STRICTLY for permanent Telegram user privacy restrictions or blocked/deleted accounts
+            case.status = "UNCONTACTABLE"
+            case.contactable = False
+            case.uncontactable_reason = res["uncontactable_reason"]
+            db.commit()
+            logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
 
-                msg = RecoveryMessage(
-                    case_id=case.id,
-                    direction="OUTBOUND",
-                    sender_type="USERBOT",
-                    userbot_username=res["userbot_username"],
-                    text=outbound_text,
-                    sent_at=now
-                )
-                db.add(msg)
-                db.commit()
-                logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} via {res['userbot_username']}")
-
-            elif res.get("uncontactable_reason"):
-                # Permanent privacy or block restriction
-                case.status = "UNCONTACTABLE"
-                case.contactable = False
-                case.uncontactable_reason = res["uncontactable_reason"]
-                db.commit()
-                logger.info(f"[🛡️ Marked Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
-
-            elif not res.get("can_retry", True):
-                case.status = "UNCONTACTABLE"
-                case.contactable = False
-                case.uncontactable_reason = res.get("error", "UNKNOWN_ERROR")
-                db.commit()
+        elif res.get("can_retry", True):
+            # Temporary bot quota, cooldown, or network delay -> POSTPONE, DO NOT mark uncontactable!
+            retry_seconds = res.get("retry_delay_seconds", 900)
+            case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
+            db.commit()
+            logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """
