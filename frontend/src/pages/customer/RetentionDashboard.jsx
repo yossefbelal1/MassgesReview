@@ -202,7 +202,7 @@ export default function RetentionDashboard({ onNavigate }) {
       case 'SCHEDULED':
         return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">⏱️ مجدولة للتواصل</span>;
       case 'UNCONTACTABLE':
-        return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">🛡️ غير قابل للمراسلة</span>;
+        return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-300 border border-sky-500/30 flex items-center gap-1">👤 تتطلب مراسلة يدوية</span>;
       case 'OPT_OUT':
         return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">⛔ رفض المتابعة</span>;
       default:
@@ -474,6 +474,27 @@ export default function RetentionDashboard({ onNavigate }) {
                                 <MessageSquare className="w-3.5 h-3.5" />
                                 <span>المحادثة</span>
                               </button>
+                              {c.user_username ? (
+                                <a
+                                  href={`https://t.me/${c.user_username}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold border border-sky-500/20 transition-all inline-flex items-center gap-1"
+                                  title="فتح المحادثة في تطبيق تيليجرام"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  <span>تيليجرام</span>
+                                </a>
+                              ) : (
+                                <a
+                                  href={`tg://user?id=${c.telegram_user_id}`}
+                                  className="px-2.5 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold border border-sky-500/20 transition-all inline-flex items-center gap-1"
+                                  title="فتح المحادثة في تطبيق تيليجرام"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  <span>تيليجرام</span>
+                                </a>
+                              )}
                               {c.status === 'UNCONTACTABLE' && (
                                 <button
                                   onClick={() => handleRetryCase(c.id)}
@@ -819,6 +840,27 @@ export default function RetentionDashboard({ onNavigate }) {
               </div>
 
               <div className="flex items-center gap-2">
+                {selectedCase.user_username ? (
+                  <a
+                    href={`https://t.me/${selectedCase.user_username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 text-[11px] font-bold border border-sky-500/20 transition-all flex items-center gap-1"
+                    title="فتح المحادثة في تطبيق تيليجرام"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>تيليجرام ↗</span>
+                  </a>
+                ) : (
+                  <a
+                    href={`tg://user?id=${selectedCase.telegram_user_id}`}
+                    className="px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 text-[11px] font-bold border border-sky-500/20 transition-all flex items-center gap-1"
+                    title="فتح المحادثة في تطبيق تيليجرام"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>تيليجرام ↗</span>
+                  </a>
+                )}
                 {selectedCase.status === 'UNCONTACTABLE' && (
                   <button
                     type="button"
@@ -845,7 +887,7 @@ export default function RetentionDashboard({ onNavigate }) {
                 <div className="p-8 text-center text-slate-400">جاري تحميل سجل المحادثة...</div>
               ) : caseMessages.length === 0 ? (
                 <div className="p-8 text-center text-slate-500 italic">
-                  لم يتم تبادل أي رسائل بعد. الرسالة مجدولة للإرسال تلقائياً أو يمكنك المراسلة يدوياً الآن بالأسفل.
+                  لم يتم تبادل أي رسائل بعد. الرسالة مجدولة للإرسال تلقائياً أو يمكنك المراسلة يدوياً الآن بالأسفل أو فتح تيليجرام مباشرة.
                 </div>
               ) : (
                 caseMessages.map((msg) => {
@@ -884,6 +926,32 @@ export default function RetentionDashboard({ onNavigate }) {
                   );
                 })
               )}
+            </div>
+
+            {/* Quick Templates */}
+            <div className="px-3 py-1.5 bg-slate-950/90 border-t border-slate-800/60 flex items-center gap-1.5 overflow-x-auto text-[10px]">
+              <span className="text-slate-500 font-semibold whitespace-nowrap">قوالب:</span>
+              <button
+                type="button"
+                onClick={() => setManualText("مرحباً يا غالي، لاحظنا مغادرتك للقناة وحبينا نتطمن عليك 🌹 هل خرجت بالخطأ؟")}
+                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+              >
+                مغادرة بالخطأ 🌹
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualText("أهلاً بك، تفضل رابط العودة المباشر للقناة: ")}
+                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+              >
+                رابط العودة 🔗
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualText("مرحباً، يسعدنا سماع رأيك أو أي اقتراح لتطوير محتوى القناة لتناسبك أكثر 💡")}
+                className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 whitespace-nowrap transition-colors"
+              >
+                استفسار واقتراح 💡
+              </button>
             </div>
 
             {/* Manual Reply Input */}
