@@ -23,6 +23,7 @@ export default function Sidebar({ currentTab, setCurrentTab, adminViewMode, setA
     { id: 'dashboard', name: 'الرئيسية (الإحصائيات)', icon: LayoutDashboard },
     { id: 'channels', name: 'قنواتي (ربط وتفعيل)', icon: Radio },
     { id: 'automations', name: 'الكلمات المفتاحية (الأهداف)', icon: Workflow },
+    { id: 'retention', name: 'استعادة الأعضاء (Win-back)', icon: UserCheck },
     { id: 'history', name: 'سجل النشر المباشر', icon: History },
     { id: 'subscription', name: 'باقتي والاشتراك', icon: CreditCard },
   ];

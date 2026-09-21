@@ -21,8 +21,8 @@ export default function MobileBottomNav({ currentTab, setCurrentTab, adminViewMo
     { id: 'dashboard', name: 'الرئيسية', icon: LayoutDashboard },
     { id: 'channels', name: 'قنواتي', icon: Radio },
     { id: 'automations', name: 'الأتمتة', icon: Workflow },
+    { id: 'retention', name: 'استعادة', icon: UserCheck },
     { id: 'history', name: 'السجل', icon: History },
-    { id: 'subscription', name: 'باقتي', icon: CreditCard },
   ];
 
   const adminItems = [

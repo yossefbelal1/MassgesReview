@@ -67,4 +67,8 @@ scratch/
 *.swp
 *.swo
 .DS_Store
+thumbs.db
 Thumbs.db
+
+# Misc
+random projects/

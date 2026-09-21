@@ -223,3 +223,100 @@ class SubscriptionUpdateAdmin(BaseModel):
 class AdminResetPassword(BaseModel):
     new_password: str
 
+# Retention & Win-back Schemas
+class RetentionSettingBase(BaseModel):
+    is_retention_enabled: bool = True
+    is_welcome_enabled: bool = False
+    initial_delay_seconds: int = 180
+    welcome_message_template: Optional[str] = None
+    recovery_first_message_template: Optional[str] = None
+    invite_link: Optional[str] = None
+    max_daily_contacts: int = 30
+
+class RetentionSettingUpdate(RetentionSettingBase):
+    pass
+
+class RetentionSettingOut(RetentionSettingBase):
+    id: str
+    tenant_id: str
+    channel_id: str
+    created_at: datetime
+    updated_at: Optional[datetime]
+    class Config:
+        from_attributes = True
+
+class AudienceMemberOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    telegram_user_id: str
+    username: Optional[str]
+    first_name: Optional[str]
+    last_name: Optional[str]
+    phone: Optional[str]
+    status: str
+    first_joined_at: datetime
+    last_left_at: Optional[datetime]
+    last_rejoined_at: Optional[datetime]
+    interests: List[Any] = []
+    onboarding_status: str
+    notes: Optional[str]
+    class Config:
+        from_attributes = True
+
+class RecoveryMessageOut(BaseModel):
+    id: str
+    case_id: str
+    direction: str
+    sender_type: str
+    userbot_username: Optional[str]
+    text: str
+    intent_detected: Optional[str]
+    sent_at: datetime
+    class Config:
+        from_attributes = True
+
+class RecoveryMessageCreate(BaseModel):
+    text: str
+
+class RecoveryCaseOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    channel_title: Optional[str] = None
+    member_id: Optional[str]
+    telegram_user_id: str
+    user_full_name: Optional[str] = None
+    user_username: Optional[str] = None
+    status: str
+    contactable: bool
+    uncontactable_reason: Optional[str]
+    assigned_userbot: Optional[str]
+    leave_reason_category: Optional[str]
+    leave_reason_raw: Optional[str]
+    scheduled_contact_at: Optional[datetime]
+    first_contacted_at: Optional[datetime]
+    last_response_at: Optional[datetime]
+    link_sent_at: Optional[datetime]
+    rejoined_at: Optional[datetime]
+    time_to_rejoin_seconds: Optional[int]
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class RecoveryCaseDetailOut(RecoveryCaseOut):
+    messages: List[RecoveryMessageOut] = []
+
+class RetentionSummaryOut(BaseModel):
+    total_left_detected: int
+    total_contact_attempted: int
+    total_contacted: int
+    total_in_conversation: int
+    total_rejoined: int
+    win_back_rate_percent: float
+    uncontactable_count: int
+    average_rejoin_hours: float
+    reasons_breakdown: List[dict] = []
+    daily_trend: List[dict] = []
+
+

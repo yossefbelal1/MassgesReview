@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal
-from backend.app.models.models import Channel, Automation, Job
 from backend.app.services.telegram_service import telegram_service
+from backend.app.services.userbot_pool import userbot_pool
+from backend.app.services.retention_engine import retention_engine
 from backend.app.services.job_engine import (
     ingest_channel_messages,
     claim_next_job,
@@ -106,6 +107,43 @@ async def active_channel_watcher():
 
         await asyncio.sleep(2.0)
 
+async def retention_channel_watcher():
+    """
+    Monitors channel Recent Actions (Admin Log) for member leaves and joins.
+    Triggers retention cases and processes pending initial contacts.
+    """
+    global CHANNEL_ENTITIES, RUNNING
+
+    # Give primary connection time to settle
+    await asyncio.sleep(5.0)
+
+    while RUNNING:
+        try:
+            client = await telegram_service.ensure_connected()
+            db: Session = SessionLocal()
+
+            channels = db.query(Channel).filter(Channel.is_connected == True).all()
+            for ch in channels:
+                if not ch.tenant or not ch.tenant.is_active:
+                    continue
+                try:
+                    events_count = await retention_engine.sync_channel_admin_log(db, ch, client)
+                    if events_count > 0:
+                        print(f"[🎯 Retention Watcher]: Processed {events_count} join/leave events for '{ch.title}'", flush=True)
+                except Exception as sync_err:
+                    print(f"[!] Retention sync error for channel '{ch.title}': {sync_err}", flush=True)
+
+            # Also trigger due scheduled initial recovery contacts
+            await retention_engine.process_pending_recovery_contacts(db)
+            db.close()
+        except Exception as loop_err:
+            err_str = str(loop_err).lower()
+            print(f"[!] Retention watcher loop error: {loop_err}", flush=True)
+            if "disconnected" in err_str or "connection" in err_str:
+                await telegram_service.ensure_connected()
+
+        await asyncio.sleep(6.0)
+
 async def worker_job_executor():
     """
     Continuously claims and executes pending jobs with atomic locking,
@@ -187,8 +225,14 @@ async def main():
     except Exception as e:
         print(f"[!] Warning fetching Telegram identity: {e}", flush=True)
 
+    # Register conversational retention reply handler for incoming userbot DMs
+    userbot_pool.register_inbound_handler(retention_engine.handle_inbound_reply)
+    await userbot_pool.ensure_listeners_registered()
+    print("🛰️ [ReviewFlow Telegram Engine] Retention Inbound Listeners Active.", flush=True)
+
     await asyncio.gather(
         active_channel_watcher(),
+        retention_channel_watcher(),
         worker_job_executor(),
         keepalive_ping()
     )

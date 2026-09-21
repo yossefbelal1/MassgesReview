@@ -15,6 +15,7 @@ import AutomationsPage from './pages/customer/AutomationsPage';
 import CreateAutomation from './pages/customer/CreateAutomation';
 import PublishingHistory from './pages/customer/PublishingHistory';
 import SubscriptionPage from './pages/customer/SubscriptionPage';
+import RetentionDashboard from './pages/customer/RetentionDashboard';
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard';
@@ -53,6 +54,7 @@ function MainApp() {
       case 'dashboard': return 'الرئيسية والإحصائيات';
       case 'channels': return 'قنوات تيليجرام';
       case 'automations': return 'الكلمات المفتاحية والأهداف';
+      case 'retention': return 'استعادة ومتابعة الأعضاء (Retention & Win-back)';
       case 'create_automation': return 'إنشاء هدف / كلمة مفتاحية';
       case 'history': return 'سجل النشر المباشر';
       case 'subscription': return 'الاشتراك والباقات';
@@ -73,6 +75,8 @@ function MainApp() {
         return <ChannelsPage />;
       case 'automations':
         return <AutomationsPage onNavigate={setCurrentTab} />;
+      case 'retention':
+        return <RetentionDashboard onNavigate={setCurrentTab} />;
       case 'create_automation':
         return <CreateAutomation onNavigate={setCurrentTab} />;
       case 'history':

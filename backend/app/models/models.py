@@ -25,6 +25,9 @@ class Tenant(Base):
     automations = relationship("Automation", back_populates="tenant", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="tenant", cascade="all, delete-orphan")
     history = relationship("PublishingHistory", back_populates="tenant", cascade="all, delete-orphan")
+    retention_settings = relationship("RetentionSetting", back_populates="tenant", cascade="all, delete-orphan")
+    audience_members = relationship("AudienceMember", back_populates="tenant", cascade="all, delete-orphan")
+    recovery_cases = relationship("RecoveryCase", back_populates="tenant", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -38,7 +41,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    tenant = relationship("Tenant", back_populates="users")
+    tenant = relationship("User", back_populates="users", foreign_keys=[tenant_id]) if False else relationship("Tenant", back_populates="users")
 
 class Plan(Base):
     __tablename__ = "plans"
@@ -88,6 +91,7 @@ class Channel(Base):
     can_forward = Column(Boolean, default=True)
     verified_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen_message_id = Column(Integer, default=0)
+    last_seen_admin_log_id = Column(String, default="0")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -97,6 +101,9 @@ class Channel(Base):
     tenant = relationship("Tenant", back_populates="channels")
     automations = relationship("Automation", back_populates="channel", cascade="all, delete-orphan")
     jobs = relationship("Job", back_populates="channel", cascade="all, delete-orphan")
+    retention_setting = relationship("RetentionSetting", back_populates="channel", uselist=False, cascade="all, delete-orphan")
+    audience_members = relationship("AudienceMember", back_populates="channel", cascade="all, delete-orphan")
+    recovery_cases = relationship("RecoveryCase", back_populates="channel", cascade="all, delete-orphan")
 
 class MessageLibrary(Base):
     __tablename__ = "message_library"
@@ -236,3 +243,105 @@ class WorkerHeartbeat(Base):
     last_heartbeat_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     started_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     details = Column(JSON, default=dict)
+
+class RetentionSetting(Base):
+    __tablename__ = "retention_settings"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), unique=True, nullable=False)
+    is_retention_enabled = Column(Boolean, default=True)
+    is_welcome_enabled = Column(Boolean, default=False)
+    initial_delay_seconds = Column(Integer, default=180)  # Default 3 mins delay before recovery contact
+    welcome_message_template = Column(Text, nullable=True)
+    recovery_first_message_template = Column(Text, nullable=True)
+    invite_link = Column(String, nullable=True)
+    max_daily_contacts = Column(Integer, default=30)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    tenant = relationship("Tenant", back_populates="retention_settings")
+    channel = relationship("Channel", back_populates="retention_setting")
+
+class AudienceMember(Base):
+    __tablename__ = "audience_members"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    telegram_user_id = Column(String, index=True, nullable=False)
+    username = Column(String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    status = Column(String, default="ACTIVE")  # ACTIVE, LEFT, RECOVERED, OPT_OUT
+    first_joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_left_at = Column(DateTime, nullable=True)
+    last_rejoined_at = Column(DateTime, nullable=True)
+    interests = Column(JSON, default=list)  # ["Gold", "Forex", "Education"]
+    onboarding_status = Column(String, default="NONE")  # NONE, PENDING, COMPLETED
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_member_tenant_channel_tg", "tenant_id", "channel_id", "telegram_user_id"),
+        UniqueConstraint("channel_id", "telegram_user_id", name="uq_channel_telegram_user"),
+    )
+
+    tenant = relationship("Tenant", back_populates="audience_members")
+    channel = relationship("Channel", back_populates="audience_members")
+    cases = relationship("RecoveryCase", back_populates="member", cascade="all, delete-orphan")
+
+class RecoveryCase(Base):
+    __tablename__ = "recovery_cases"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    member_id = Column(String, ForeignKey("audience_members.id", ondelete="CASCADE"), nullable=True)
+    telegram_user_id = Column(String, index=True, nullable=False)
+    leave_event_id = Column(String, index=True, nullable=True)
+    status = Column(String, default="DETECTED")  # DETECTED, SCHEDULED, ATTEMPTING_CONTACT, CONTACTED, CONVERSATION_ACTIVE, LINK_DELIVERED, RECOVERED, NO_RESPONSE, UNCONTACTABLE, OPT_OUT, CHURNED
+    contactable = Column(Boolean, default=True)
+    uncontactable_reason = Column(String, nullable=True)  # PRIVACY_RESTRICTED, PEER_FLOOD, USER_BLOCKED, USER_DELETED
+    assigned_userbot = Column(String, nullable=True)
+    leave_reason_category = Column(String, nullable=True)  # MISTAKE_OR_LOST_LINK, TOO_MANY_MESSAGES, CONTENT_CRITIQUE, NOT_INTERESTED, PRICE, OTHER
+    leave_reason_raw = Column(Text, nullable=True)
+    scheduled_contact_at = Column(DateTime, nullable=True)
+    first_contacted_at = Column(DateTime, nullable=True)
+    last_response_at = Column(DateTime, nullable=True)
+    link_sent_at = Column(DateTime, nullable=True)
+    rejoined_at = Column(DateTime, nullable=True)
+    time_to_rejoin_seconds = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_case_tenant_channel_status", "tenant_id", "channel_id", "status"),
+        Index("idx_case_tg_user_status", "telegram_user_id", "status"),
+    )
+
+    tenant = relationship("Tenant", back_populates="recovery_cases")
+    channel = relationship("Channel", back_populates="recovery_cases")
+    member = relationship("AudienceMember", back_populates="cases")
+    messages = relationship("RecoveryMessage", back_populates="case", cascade="all, delete-orphan", order_by="RecoveryMessage.sent_at")
+
+class RecoveryMessage(Base):
+    __tablename__ = "recovery_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    case_id = Column(String, ForeignKey("recovery_cases.id", ondelete="CASCADE"), nullable=False)
+    direction = Column(String, nullable=False)  # OUTBOUND, INBOUND
+    sender_type = Column(String, default="USERBOT")  # USERBOT, MEMBER, SYSTEM
+    userbot_username = Column(String, nullable=True)
+    text = Column(Text, nullable=False)
+    intent_detected = Column(String, nullable=True)
+    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_msg_case_sent", "case_id", "sent_at"),
+    )
+
+    case = relationship("RecoveryCase", back_populates="messages")
+

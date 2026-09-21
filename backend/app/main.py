@@ -4,7 +4,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import Base, engine, SessionLocal
 from backend.app.core.security import get_password_hash
 from backend.app.models.models import User, Plan, Tenant, Subscription
-from backend.app.api import auth, admin, channels, messages, automations, jobs, history, health
+from backend.app.api import auth, admin, channels, messages, automations, jobs, history, health, retention
 
 import os
 # Create database tables only in dev/testing; production strictly uses Alembic migrations
@@ -154,6 +154,7 @@ app.include_router(automations.router, prefix=f"{settings.API_V1_STR}/automation
 app.include_router(jobs.router, prefix=f"{settings.API_V1_STR}/jobs", tags=["Jobs"])
 app.include_router(history.router, prefix=f"{settings.API_V1_STR}/history", tags=["Publishing History"])
 app.include_router(health.router, prefix=f"{settings.API_V1_STR}/health", tags=["Health"])
+app.include_router(retention.router, prefix=f"{settings.API_V1_STR}/retention", tags=["Retention & Win-back"])
 
 @app.get("/")
 def root():

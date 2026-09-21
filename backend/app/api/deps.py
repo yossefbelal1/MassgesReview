@@ -62,3 +62,11 @@ def get_current_tenant(
     if not tenant or not tenant.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant is inactive or suspended")
     return tenant
+
+def get_current_tenant_id(
+    current_user: User = Depends(get_current_active_customer),
+) -> str:
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tenant associated with user")
+    return current_user.tenant_id
+

@@ -146,6 +146,7 @@ export default function MobileDrawer({ isOpen, onClose, currentTab, setCurrentTa
               { id: 'dashboard', name: 'الرئيسية والإحصائيات', icon: LayoutDashboard },
               { id: 'channels', name: 'قنواتي وتيليجرام', icon: Radio },
               { id: 'automations', name: 'الكلمات المفتاحية والأهداف', icon: Workflow },
+              { id: 'retention', name: 'استعادة الأعضاء (Win-back)', icon: UserCheck },
               { id: 'history', name: 'سجل النشر والتدقيق', icon: History },
               { id: 'subscription', name: 'الاشتراك والباقة', icon: CreditCard },
             ]).map((link) => {
