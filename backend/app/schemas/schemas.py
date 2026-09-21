@@ -319,4 +319,50 @@ class RetentionSummaryOut(BaseModel):
     reasons_breakdown: List[dict] = []
     daily_trend: List[dict] = []
 
+# Dedicated Channel Userbot Schemas
+class UserbotSendCodeRequest(BaseModel):
+    channel_id: str
+    api_id: int
+    api_hash: str
+    phone: str
+
+class UserbotSendCodeResponse(BaseModel):
+    success: bool
+    login_attempt_id: str
+    phone_code_hash: str
+    message: str
+
+class UserbotVerifyCodeRequest(BaseModel):
+    login_attempt_id: str
+    code: str
+    password: Optional[str] = None
+
+class ChannelUserbotProfile(BaseModel):
+    telegram_user_id: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    phone: Optional[str] = None
+
+class UserbotVerifyCodeResponse(BaseModel):
+    success: bool
+    needs_2fa: bool = False
+    message: str
+    userbot: Optional[ChannelUserbotProfile] = None
+
+class ChannelUserbotOut(BaseModel):
+    id: str
+    channel_id: str
+    phone: str
+    telegram_user_id: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    is_active: bool
+    status: str
+    daily_contacts_count: int
+    last_error: Optional[str] = None
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+
 

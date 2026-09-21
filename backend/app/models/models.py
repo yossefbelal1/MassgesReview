@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Integer, Boolean, DateTime, ForeignKey, Text, Float, Enum, JSON, Index, UniqueConstraint
+    Column, String, Integer, Boolean, DateTime, Date, ForeignKey, Text, Float, Enum, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from backend.app.core.database import Base
@@ -28,6 +28,7 @@ class Tenant(Base):
     retention_settings = relationship("RetentionSetting", back_populates="tenant", cascade="all, delete-orphan")
     audience_members = relationship("AudienceMember", back_populates="tenant", cascade="all, delete-orphan")
     recovery_cases = relationship("RecoveryCase", back_populates="tenant", cascade="all, delete-orphan")
+    channel_userbots = relationship("ChannelUserbot", back_populates="tenant", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -104,6 +105,8 @@ class Channel(Base):
     retention_setting = relationship("RetentionSetting", back_populates="channel", uselist=False, cascade="all, delete-orphan")
     audience_members = relationship("AudienceMember", back_populates="channel", cascade="all, delete-orphan")
     recovery_cases = relationship("RecoveryCase", back_populates="channel", cascade="all, delete-orphan")
+    userbot = relationship("ChannelUserbot", back_populates="channel", uselist=False, cascade="all, delete-orphan")
+    login_attempts = relationship("UserbotLoginAttempt", back_populates="channel", cascade="all, delete-orphan")
 
 class MessageLibrary(Base):
     __tablename__ = "message_library"
@@ -345,4 +348,57 @@ class RecoveryMessage(Base):
     )
 
     case = relationship("RecoveryCase", back_populates="messages")
+
+
+class ChannelUserbot(Base):
+    __tablename__ = "channel_userbots"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), unique=True, nullable=False)
+    api_id = Column(Integer, nullable=False)
+    api_hash = Column(String(64), nullable=False)
+    phone = Column(String(32), nullable=False)
+    string_session = Column(Text, nullable=False)
+    telegram_user_id = Column(String(64), nullable=True)
+    username = Column(String(128), nullable=True)
+    first_name = Column(String(128), nullable=True)
+    is_active = Column(Boolean, default=True)
+    status = Column(String(32), default="CONNECTED")  # CONNECTED, NEEDS_REAUTH, DISCONNECTED, FLOOD_WAIT
+    daily_contacts_count = Column(Integer, default=0)
+    last_contact_date = Column(Date, nullable=True)
+    cooldown_until = Column(DateTime, nullable=True)
+    last_error = Column(String(256), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_channel_userbot_tenant_chan", "tenant_id", "channel_id"),
+        UniqueConstraint("channel_id", name="uq_channel_userbot_channel"),
+    )
+
+    tenant = relationship("Tenant", back_populates="channel_userbots")
+    channel = relationship("Channel", back_populates="userbot")
+
+
+class UserbotLoginAttempt(Base):
+    __tablename__ = "userbot_login_attempts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    api_id = Column(Integer, nullable=False)
+    api_hash = Column(String(64), nullable=False)
+    phone = Column(String(32), nullable=False)
+    phone_code_hash = Column(String(128), nullable=False)
+    temp_session_str = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("idx_login_attempt_chan_exp", "channel_id", "expires_at"),
+    )
+
+    channel = relationship("Channel", back_populates="login_attempts")
+
 

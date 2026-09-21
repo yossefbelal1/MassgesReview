@@ -16,9 +16,10 @@ from telethon.tl.types import (
 
 from backend.app.core.database import SessionLocal
 from backend.app.models.models import (
-    Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, Tenant
+    Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, Tenant, ChannelUserbot
 )
 from backend.app.services.userbot_pool import userbot_pool
+from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
 
 logger = logging.getLogger("reviewflow.retention_engine")
 
@@ -427,7 +428,7 @@ class RetentionEngine:
                                     .replace("{channel}", channel.title)\
                                     .replace("{invite_link}", invite_url or "")
 
-            # Attempt sending via UserbotPool with access_hash if available
+            # Attempt sending via dedicated channel userbot or fallback to shared UserbotPool
             access_hash = None
             if case.member and case.member.access_hash:
                 try:
@@ -435,13 +436,37 @@ class RetentionEngine:
                 except (ValueError, TypeError):
                     access_hash = None
 
-            res = await userbot_pool.send_direct_message(
-                target_user_id=int(case.telegram_user_id),
-                text=outbound_text,
-                channel_id=channel.id,
-                target_username=username,
-                access_hash=access_hash
-            )
+            has_dedicated = db.query(ChannelUserbot).filter(
+                ChannelUserbot.channel_id == channel.id,
+                ChannelUserbot.is_active == True
+            ).first()
+
+            if has_dedicated:
+                res = await dedicated_userbot_service.send_direct_message_for_channel(
+                    db=db,
+                    channel_id=channel.id,
+                    target_user_id=int(case.telegram_user_id),
+                    text=outbound_text,
+                    target_username=username,
+                    access_hash=access_hash
+                )
+                if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT"]:
+                    logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
+                    res = await userbot_pool.send_direct_message(
+                        target_user_id=int(case.telegram_user_id),
+                        text=outbound_text,
+                        channel_id=channel.id,
+                        target_username=username,
+                        access_hash=access_hash
+                    )
+            else:
+                res = await userbot_pool.send_direct_message(
+                    target_user_id=int(case.telegram_user_id),
+                    text=outbound_text,
+                    channel_id=channel.id,
+                    target_username=username,
+                    access_hash=access_hash
+                )
 
             if res["success"]:
                 case.status = "CONTACTED"
@@ -578,6 +603,35 @@ class RetentionEngine:
         """Delivers welcome message to new joiner."""
         name_display = first_name or "صديقنا العزيز"
         text = settings.welcome_message_template.replace("{name}", name_display).replace("{channel}", channel.title)
+
+        db: Session = SessionLocal()
+        has_dedicated = None
+        try:
+            has_dedicated = db.query(ChannelUserbot).filter(
+                ChannelUserbot.channel_id == channel.id,
+                ChannelUserbot.is_active == True
+            ).first()
+        except Exception:
+            pass
+
+        if has_dedicated:
+            try:
+                res = await dedicated_userbot_service.send_direct_message_for_channel(
+                    db=db,
+                    channel_id=channel.id,
+                    target_user_id=int(telegram_user_id),
+                    text=text,
+                    target_username=username,
+                    access_hash=access_hash
+                )
+                db.close()
+                if res.get("success"):
+                    return
+            except Exception:
+                pass
+        else:
+            db.close()
+
         await userbot_pool.send_direct_message(
             target_user_id=int(telegram_user_id),
             text=text,

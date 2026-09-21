@@ -7,13 +7,16 @@ from sqlalchemy import func, desc, or_
 from backend.app.core.database import get_db
 from backend.app.api.deps import get_current_user, get_current_tenant_id
 from backend.app.models.models import (
-    User, Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting
+    User, Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, ChannelUserbot
 )
 from backend.app.schemas.schemas import (
     RecoveryCaseOut, RecoveryCaseDetailOut, RecoveryMessageOut, RecoveryMessageCreate,
-    RetentionSettingOut, RetentionSettingUpdate, AudienceMemberOut, RetentionSummaryOut
+    RetentionSettingOut, RetentionSettingUpdate, AudienceMemberOut, RetentionSummaryOut,
+    UserbotSendCodeRequest, UserbotSendCodeResponse, UserbotVerifyCodeRequest, UserbotVerifyCodeResponse,
+    ChannelUserbotOut
 )
 from backend.app.services.userbot_pool import userbot_pool
+from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
 
 router = APIRouter()
 
@@ -500,4 +503,102 @@ async def update_userbot_avatar(
         return {"success": True, "message": "تم تحديث صورة بروفايل اليوزربوت على تيليجرام بنجاح! 🎉"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"خطأ أثناء رفع الصورة لتيليجرام: {str(e)}")
+
+
+# ── Dedicated Per-Channel Userbot Endpoints ─────────────────────────────────
+
+@router.post("/userbot/request-code", response_model=UserbotSendCodeResponse)
+async def request_userbot_login_code(
+    payload: UserbotSendCodeRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Step 1: Sends login code (OTP) via Telegram MTProto to channel owner's phone.
+    """
+    return await dedicated_userbot_service.send_login_code(
+        db=db,
+        tenant_id=tenant_id,
+        channel_id=payload.channel_id,
+        api_id=payload.api_id,
+        api_hash=payload.api_hash,
+        phone=payload.phone
+    )
+
+
+@router.post("/userbot/verify-code", response_model=UserbotVerifyCodeResponse)
+async def verify_userbot_login_code(
+    payload: UserbotVerifyCodeRequest,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Step 2: Verifies code (and optional 2FA password) and establishes persistent StringSession.
+    """
+    return await dedicated_userbot_service.verify_login_code(
+        db=db,
+        tenant_id=tenant_id,
+        login_attempt_id=payload.login_attempt_id,
+        code=payload.code,
+        password=payload.password
+    )
+
+
+@router.get("/userbot/{channel_id}", response_model=Optional[ChannelUserbotOut])
+def get_channel_dedicated_userbot(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns active dedicated userbot details for the channel if connected.
+    """
+    userbot = db.query(ChannelUserbot).filter(
+        ChannelUserbot.channel_id == channel_id,
+        ChannelUserbot.tenant_id == tenant_id
+    ).first()
+    return userbot
+
+
+@router.delete("/userbot/{channel_id}")
+async def disconnect_channel_dedicated_userbot(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Disconnects and removes dedicated userbot for the channel.
+    Channel will immediately revert to using the shared userbot pool.
+    """
+    return await dedicated_userbot_service.disconnect_userbot(
+        db=db,
+        tenant_id=tenant_id,
+        channel_id=channel_id
+    )
+
+
+@router.post("/userbot/{channel_id}/avatar")
+async def update_channel_userbot_avatar(
+    channel_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Uploads a new profile picture to Telegram for the channel's dedicated userbot.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="يرجى رفع ملف صورة صالح (JPEG أو PNG)")
+
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)")
+
+    return await dedicated_userbot_service.upload_userbot_avatar(db, channel_id, contents)
+
 
