@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal
+from backend.app.models.models import Channel, Automation
 from backend.app.services.telegram_service import telegram_service
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.retention_engine import retention_engine
