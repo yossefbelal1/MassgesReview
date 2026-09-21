@@ -166,7 +166,7 @@ class UserbotPool:
                 "error": "ALL_SESSIONS_BUSY_OR_LIMIT_REACHED",
                 "error_ar": "حساب اليوزربوت في فترة انتظار حالياً أو استنفد الحد اليومي. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة.",
                 "can_retry": True,
-                "retry_delay_seconds": 1800
+                "retry_delay_seconds": 120
             }
 
         client = await session.get_client()
@@ -180,14 +180,14 @@ class UserbotPool:
                 "error": "CLIENT_DISCONNECTED",
                 "error_ar": "تعذر الاتصال بحساب اليوزربوت حالياً. يمكنك استخدام زر تيليجرام ↗ للمراسلة الفورية من حسابك.",
                 "can_retry": True,
-                "retry_delay_seconds": 60
+                "retry_delay_seconds": 30
             }
 
-        # Anti-spam safety spacing (8-14s between cold outreach)
+        # Fast minimal anti-spam pacing (1.5 - 3.0s)
         now = time.time()
         elapsed_since_last = now - session.last_message_sent_at
-        if elapsed_since_last < 10.0:
-            await asyncio.sleep(random.uniform(8.0, 14.0))
+        if elapsed_since_last < 2.5:
+            await asyncio.sleep(random.uniform(1.5, 3.0))
 
         try:
             # 1. If access_hash is provided, use InputPeerUser directly (100% reliable across restarts)

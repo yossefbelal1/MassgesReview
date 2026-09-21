@@ -377,11 +377,11 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 300
             }
 
-        # Safe anti-spam pacing between consecutive cold DMs (8-14s)
+        # Fast minimal anti-spam pacing (1.5 - 3.0s) for rapid outreach
         last_sent = self._last_message_times.get(channel_id, 0.0)
         elapsed = time.time() - last_sent
-        if elapsed < 8.0:
-            await asyncio.sleep(random.uniform(7.0, 12.0))
+        if elapsed < 2.0:
+            await asyncio.sleep(random.uniform(1.5, 3.0))
 
         try:
             # Resolve target entity

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Response
@@ -17,7 +19,9 @@ from backend.app.schemas.schemas import (
 )
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
+from backend.app.services.retention_engine import retention_engine
 
+logger = logging.getLogger("reviewflow.retention")
 router = APIRouter()
 
 @router.get("/summary", response_model=RetentionSummaryOut)
@@ -315,14 +319,15 @@ async def send_manual_case_message(
 
 
 @router.post("/cases/{case_id}/retry", response_model=RecoveryCaseOut)
-def retry_single_recovery_case(
+async def retry_single_recovery_case(
     case_id: str,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Resets a specific recovery case back to SCHEDULED for outreach.
+    Resets a specific recovery case back to SCHEDULED for immediate outreach,
+    and proactively triggers background worker dispatch.
     """
     case = db.query(RecoveryCase).filter(
         RecoveryCase.id == case_id,
@@ -332,39 +337,89 @@ def retry_single_recovery_case(
     if not case:
         raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
 
+    now = datetime.now(timezone.utc)
     case.status = "SCHEDULED"
     case.contactable = True
     case.uncontactable_reason = None
-    case.scheduled_contact_at = datetime.now(timezone.utc)
+    case.scheduled_contact_at = now
     db.commit()
     db.refresh(case)
+
+    # Immediately trigger processing in background
+    try:
+        asyncio.create_task(retention_engine.process_pending_recovery_contacts(db))
+    except Exception as e:
+        logger.warning(f"Error triggering immediate dispatch for case {case_id}: {e}")
+
     return case
 
 
-@router.post("/cases/reset-all")
-def reset_all_uncontactable_cases(
+@router.post("/cases/{case_id}/send-now")
+async def send_case_now_direct(
+    case_id: str,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Resets all false UNCONTACTABLE cases back to SCHEDULED with staggered delays.
+    Directly dispatches the win-back outreach message to a specific member right now.
     """
-    cases = db.query(RecoveryCase).filter(
-        RecoveryCase.tenant_id == tenant_id,
-        RecoveryCase.status == "UNCONTACTABLE"
-    ).all()
+    case = db.query(RecoveryCase).filter(
+        RecoveryCase.id == case_id,
+        RecoveryCase.tenant_id == tenant_id
+    ).first()
 
+    if not case:
+        raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
+
+    res = await retention_engine.send_recovery_to_case(db, case)
+    db.refresh(case)
+    return {
+        "success": res.get("success", False),
+        "status": case.status,
+        "userbot": case.assigned_userbot,
+        "message": res.get("message") or res.get("error") or "تمت المحاولة."
+    }
+
+
+@router.post("/cases/reset-all")
+async def reset_all_uncontactable_cases(
+    channel_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Immediately resets and dispatches all uncontacted, pending, or failed cases.
+    Targets SCHEDULED, DETECTED, UNCONTACTABLE, and NO_RESPONSE cases without any delay.
+    """
+    query = db.query(RecoveryCase).filter(
+        RecoveryCase.tenant_id == tenant_id,
+        RecoveryCase.status.in_(["SCHEDULED", "DETECTED", "UNCONTACTABLE", "NO_RESPONSE"])
+    )
+    if channel_id:
+        query = query.filter(RecoveryCase.channel_id == channel_id)
+
+    cases = query.all()
     now = datetime.now(timezone.utc)
-    for idx, c in enumerate(cases):
+    for c in cases:
         c.status = "SCHEDULED"
         c.contactable = True
         c.uncontactable_reason = None
-        # Stagger by 35 seconds to maintain anti-spam safety
-        c.scheduled_contact_at = now + timedelta(seconds=(idx * 35))
+        c.scheduled_contact_at = now  # Send NOW without delay!
 
     db.commit()
-    return {"reset_count": len(cases), "message": f"تمت إعادة جدولة {len(cases)} حالة بأمان بفارق زمني لتفادي الحظر."}
+
+    # Trigger background worker dispatch immediately
+    try:
+        asyncio.create_task(retention_engine.process_pending_recovery_contacts(db))
+    except Exception as e:
+        logger.warning(f"Error triggering batch dispatch: {e}")
+
+    return {
+        "reset_count": len(cases),
+        "message": f"تم إطلاق الإرسال الفوري لـ {len(cases)} عضواً بنجاح ⚡"
+    }
 
 
 @router.get("/members", response_model=List[AudienceMemberOut])

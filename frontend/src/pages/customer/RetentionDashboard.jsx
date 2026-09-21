@@ -4,7 +4,7 @@ import {
   UserCheck, Users, RefreshCw, MessageSquare, ShieldAlert, CheckCircle2, 
   Clock, Sparkles, Filter, Search, ArrowUpRight, Send, AlertCircle, 
   Settings, BarChart3, Bot, ChevronLeft, X, ExternalLink, Radio, MessageCircle,
-  Camera, Upload, Eye, Check, Copy, HelpCircle, Key, Phone, ShieldCheck, ChevronDown, ChevronUp, Trash2, Power
+  Camera, Upload, Eye, Check, Copy, HelpCircle, Key, Phone, ShieldCheck, ChevronDown, ChevronUp, Trash2, Power, Zap
 } from 'lucide-react';
 
 const WINBACK_TEMPLATES = [
@@ -64,6 +64,18 @@ export default function RetentionDashboard({ onNavigate }) {
   // Avatar upload state
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarTimestamp, setAvatarTimestamp] = useState(Date.now());
+
+  // Fast Outreach & Notification Toast State
+  const [toast, setToast] = useState(null);
+  const [bulkSending, setBulkSending] = useState(false);
+  const [sendingCaseId, setSendingCaseId] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4500);
+  };
 
   // Dedicated Userbot State
   const [dedicatedUserbot, setDedicatedUserbot] = useState(null);
@@ -375,28 +387,52 @@ export default function RetentionDashboard({ onNavigate }) {
 
   const handleRetryCase = async (caseId) => {
     try {
-      await apiClient.post(`/retention/cases/${caseId}/retry`);
+      setSendingCaseId(caseId);
+      const res = await apiClient.post(`/retention/cases/${caseId}/retry`);
+      showToast('تمت إعادة جدولة العضو وتفعيل الإرسال الفوري ⚡', 'success');
       if (selectedCase && selectedCase.id === caseId) {
         setSelectedCase(prev => ({ ...prev, status: 'SCHEDULED', contactable: true }));
       }
-      fetchData();
+      await fetchData();
     } catch (err) {
-      alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
+      showToast('حدث خطأ أثناء المحاولة: ' + (err.response?.data?.detail || err.message), 'error');
+    } finally {
+      setSendingCaseId(null);
     }
   };
 
-  const handleResetAllUncontactable = async () => {
+  const handleSendCaseNow = async (caseId) => {
     try {
-      setLoading(true);
-      const res = await apiClient.post('/retention/cases/reset-all');
-      alert(res.data?.message || 'تمت إعادة جدولة الحالات بنجاح.');
-      fetchData();
+      setSendingCaseId(caseId);
+      const res = await apiClient.post(`/retention/cases/${caseId}/send-now`);
+      if (res.data?.success) {
+        showToast(res.data.message || 'تم إرسال رسالة الاسترداد بنجاح! ⚡', 'success');
+      } else {
+        showToast('تنبيه أثناء الإرسال: ' + (res.data?.message || 'تعذر الإرسال حالياً'), 'error');
+      }
+      await fetchData();
     } catch (err) {
-      alert('حدث خطأ أثناء إعادة الجدولة: ' + (err.response?.data?.detail || err.message));
+      showToast('حدث خطأ أثناء الإرسال: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
-      setLoading(false);
+      setSendingCaseId(null);
     }
   };
+
+  const handleSendAllPendingNow = async () => {
+    try {
+      setBulkSending(true);
+      const chParam = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
+      const res = await apiClient.post(`/retention/cases/reset-all${chParam}`);
+      showToast(res.data?.message || 'تم إطلاق الإرسال الفوري لجميع الحالات بنجاح ⚡', 'success');
+      await fetchData();
+    } catch (err) {
+      showToast('حدث خطأ أثناء الإرسال الفوري: ' + (err.response?.data?.detail || err.message), 'error');
+    } finally {
+      setBulkSending(false);
+    }
+  };
+
+  const handleResetAllUncontactable = handleSendAllPendingNow;
 
   const handleSaveSettings = async (e) => {
     e.preventDefault();
@@ -457,7 +493,28 @@ export default function RetentionDashboard({ onNavigate }) {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto" dir="rtl">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto relative" dir="rtl">
+      {/* Floating Notification Toast */}
+      {toast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
+          <div className={`px-4 py-3 rounded-2xl shadow-2xl border backdrop-blur-md flex items-center gap-3 ${
+            toast.type === 'error' 
+              ? 'bg-rose-950/95 border-rose-500/50 text-rose-200' 
+              : 'bg-emerald-950/95 border-emerald-500/50 text-emerald-100'
+          }`}>
+            {toast.type === 'error' ? (
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            ) : (
+              <Zap className="w-5 h-5 text-amber-400 shrink-0 animate-pulse" />
+            )}
+            <span className="text-xs sm:text-sm font-bold">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="p-1 hover:opacity-75 text-slate-400 mr-2">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -615,12 +672,13 @@ export default function RetentionDashboard({ onNavigate }) {
               </select>
 
               <button
-                onClick={handleResetAllUncontactable}
-                className="px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap"
-                title="إعادة محاولة المراسلة لجميع الحالات العالقة"
+                onClick={handleSendAllPendingNow}
+                disabled={bulkSending}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-950/40 text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap active:scale-95 disabled:opacity-50"
+                title="إرسال رسائل الاسترداد فوراً بدون أي تأخير لجميع الحالات المعلقة وغير المتواصل معهم"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>إعادة مراسلة غير المتواصل معهم</span>
+                <Zap className={`w-3.5 h-3.5 ${bulkSending ? 'animate-bounce text-amber-300' : 'text-amber-300'}`} />
+                <span>{bulkSending ? 'جاري الإرسال الفوري...' : 'إرسال فوري للجميع (بدون انتظار) ⚡'}</span>
               </button>
 
               <button
@@ -731,14 +789,26 @@ export default function RetentionDashboard({ onNavigate }) {
                                   <span>تيليجرام</span>
                                 </a>
                               )}
+                              {c.status !== 'RECOVERED' && c.status !== 'CONTACTED' && c.status !== 'CONVERSATION_ACTIVE' && (
+                                <button
+                                  onClick={() => handleSendCaseNow(c.id)}
+                                  disabled={sendingCaseId === c.id}
+                                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-300 text-xs font-bold border border-emerald-500/40 transition-all inline-flex items-center gap-1 shadow-sm disabled:opacity-50 active:scale-95"
+                                  title="إرسال رسالة الاسترداد فوراً لهذا العضو دون انتظار"
+                                >
+                                  <Zap className={`w-3 h-3 ${sendingCaseId === c.id ? 'animate-spin text-amber-300' : 'text-amber-400'}`} />
+                                  <span>{sendingCaseId === c.id ? 'جاري...' : 'إرسال فوراً ⚡'}</span>
+                                </button>
+                              )}
                               {c.status === 'UNCONTACTABLE' && (
                                 <button
                                   onClick={() => handleRetryCase(c.id)}
-                                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold border border-emerald-500/20 transition-all inline-flex items-center gap-1"
-                                  title="إعادة الجدولة والمراسلة"
+                                  disabled={sendingCaseId === c.id}
+                                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-all inline-flex items-center gap-1"
+                                  title="إعادة التجهيز والمراسلة"
                                 >
                                   <RefreshCw className="w-3 h-3" />
-                                  <span>إعادة المحاولة</span>
+                                  <span>إعادة ضبط</span>
                                 </button>
                               )}
                             </div>

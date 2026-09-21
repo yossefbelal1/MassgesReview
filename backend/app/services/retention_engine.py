@@ -263,34 +263,18 @@ class RetentionEngine:
             logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
             return
 
-        # Schedule recovery contact immediately or after configured fast delay
+        # Schedule recovery contact immediately (zero delay as requested)
         now = datetime.now(timezone.utc)
-        delay_sec = settings.initial_delay_seconds if settings.initial_delay_seconds is not None else 5
 
-        # Check if leave happened in the past (e.g. historical admin log read)
+        # Check if leave happened in the distant past (e.g. historical admin log read > 48h)
         is_historical = (now - event_date).total_seconds() > (48 * 3600)
 
         if is_historical:
-            # Historical events are tracked in directory and cases but not auto-blasted
             initial_status = "DETECTED"
             scheduled_at = None
         else:
             initial_status = "SCHEDULED"
-            target_time = max(now, event_date + timedelta(seconds=delay_sec))
-
-            # Avoid concurrent collision if another case is already queued in the next 15 seconds
-            from sqlalchemy import func
-            recent_sched = db.query(func.max(RecoveryCase.scheduled_contact_at)).filter(
-                RecoveryCase.channel_id == channel.id,
-                RecoveryCase.status == "SCHEDULED",
-                RecoveryCase.scheduled_contact_at >= now,
-                RecoveryCase.scheduled_contact_at <= now + timedelta(seconds=15)
-            ).scalar()
-
-            if recent_sched:
-                scheduled_at = recent_sched + timedelta(seconds=4)
-            else:
-                scheduled_at = target_time
+            scheduled_at = now
 
         case = RecoveryCase(
             tenant_id=channel.tenant_id,
@@ -306,6 +290,13 @@ class RetentionEngine:
         db.add(case)
         db.commit()
         logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
+
+        # Immediately trigger outreach dispatch without waiting
+        if initial_status == "SCHEDULED":
+            try:
+                asyncio.create_task(self.process_pending_recovery_contacts(db))
+            except Exception as e:
+                logger.warning(f"Could not spawn immediate outreach task: {e}")
 
     async def _handle_member_join(
         self,
@@ -385,81 +376,63 @@ class RetentionEngine:
             int_hash = int(access_hash) if access_hash else None
             await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name, username, int_hash)
 
-    async def process_pending_recovery_contacts(self, db: Session):
+    async def send_recovery_to_case(self, db: Session, case: RecoveryCase) -> Dict[str, Any]:
         """
-        Executes scheduled initial recovery contacts that are due.
-        Processes up to 3 cases per cycle with rapid turnaround and anti-spam protection.
+        Dispatches initial win-back outreach message immediately to a specific recovery case.
+        Used by background worker loop and direct UI 'إرسال فوراً' action.
         """
-        now = datetime.now(timezone.utc)
-        pending_cases = db.query(RecoveryCase).filter(
-            RecoveryCase.status == "SCHEDULED",
-            RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.created_at.desc()).limit(3).all()
+        channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
+        if not channel:
+            return {"success": False, "error": "CHANNEL_NOT_FOUND"}
 
-        if not pending_cases:
-            return
+        settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
+        first_name = case.member.first_name if case.member else "يا غالي"
+        username = case.member.username if case.member else None
 
-        for case in pending_cases:
-            channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
-            if not channel:
-                continue
+        # Empathetic, respectful recovery opener with direct invite link
+        default_template = (
+            "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
+            "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
+            "{invite_link}"
+        )
+        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
 
-            settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
-            first_name = case.member.first_name if case.member else "يا غالي"
-            username = case.member.username if case.member else None
-
-            # Empathetic, respectful recovery opener with direct invite link
-            default_template = (
-                "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
-                "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
-                "{invite_link}"
-            )
-            template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
-            invite_url = settings.invite_link if (settings and settings.invite_link) else ""
-
-            # Ensure invite link is always included if configured
-            if invite_url:
-                if "{invite_link}" in template:
-                    template = template.replace("{invite_link}", invite_url)
-                else:
-                    template = f"{template.rstrip()}\n\n{invite_url}"
-
-            outbound_text = template.replace("{name}", first_name or "يا غالي")\
-                                    .replace("{channel}", channel.title)\
-                                    .replace("{invite_link}", invite_url or "")
-
-            # Attempt sending via dedicated channel userbot or fallback to shared UserbotPool
-            access_hash = None
-            if case.member and case.member.access_hash:
-                try:
-                    access_hash = int(case.member.access_hash)
-                except (ValueError, TypeError):
-                    access_hash = None
-
-            has_dedicated = db.query(ChannelUserbot).filter(
-                ChannelUserbot.channel_id == channel.id,
-                ChannelUserbot.is_active == True
-            ).first()
-
-            if has_dedicated:
-                res = await dedicated_userbot_service.send_direct_message_for_channel(
-                    db=db,
-                    channel_id=channel.id,
-                    target_user_id=int(case.telegram_user_id),
-                    text=outbound_text,
-                    target_username=username,
-                    access_hash=access_hash
-                )
-                if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT"]:
-                    logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
-                    res = await userbot_pool.send_direct_message(
-                        target_user_id=int(case.telegram_user_id),
-                        text=outbound_text,
-                        channel_id=channel.id,
-                        target_username=username,
-                        access_hash=access_hash
-                    )
+        # Ensure invite link is always included if configured
+        if invite_url:
+            if "{invite_link}" in template:
+                template = template.replace("{invite_link}", invite_url)
             else:
+                template = f"{template.rstrip()}\n\n{invite_url}"
+
+        outbound_text = template.replace("{name}", first_name or "يا غالي")\
+                                .replace("{channel}", channel.title)\
+                                .replace("{invite_link}", invite_url or "")
+
+        # Attempt sending via dedicated channel userbot or fallback to shared UserbotPool
+        access_hash = None
+        if case.member and case.member.access_hash:
+            try:
+                access_hash = int(case.member.access_hash)
+            except (ValueError, TypeError):
+                access_hash = None
+
+        has_dedicated = db.query(ChannelUserbot).filter(
+            ChannelUserbot.channel_id == channel.id,
+            ChannelUserbot.is_active == True
+        ).first()
+
+        if has_dedicated:
+            res = await dedicated_userbot_service.send_direct_message_for_channel(
+                db=db,
+                channel_id=channel.id,
+                target_user_id=int(case.telegram_user_id),
+                text=outbound_text,
+                target_username=username,
+                access_hash=access_hash
+            )
+            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT"]:
+                logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
                 res = await userbot_pool.send_direct_message(
                     target_user_id=int(case.telegram_user_id),
                     text=outbound_text,
@@ -467,40 +440,71 @@ class RetentionEngine:
                     target_username=username,
                     access_hash=access_hash
                 )
+        else:
+            res = await userbot_pool.send_direct_message(
+                target_user_id=int(case.telegram_user_id),
+                text=outbound_text,
+                channel_id=channel.id,
+                target_username=username,
+                access_hash=access_hash
+            )
 
-            if res["success"]:
-                case.status = "CONTACTED"
-                case.contactable = True
-                case.assigned_userbot = res["userbot_username"]
-                case.first_contacted_at = now
-                case.uncontactable_reason = None
+        now = datetime.now(timezone.utc)
+        if res["success"]:
+            case.status = "CONTACTED"
+            case.contactable = True
+            case.assigned_userbot = res["userbot_username"]
+            case.first_contacted_at = now
+            case.uncontactable_reason = None
 
-                msg = RecoveryMessage(
-                    case_id=case.id,
-                    direction="OUTBOUND",
-                    sender_type="USERBOT",
-                    userbot_username=res["userbot_username"],
-                    text=outbound_text,
-                    sent_at=now
-                )
-                db.add(msg)
-                db.commit()
-                logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
+            msg = RecoveryMessage(
+                case_id=case.id,
+                direction="OUTBOUND",
+                sender_type="USERBOT",
+                userbot_username=res["userbot_username"],
+                text=outbound_text,
+                sent_at=now
+            )
+            db.add(msg)
+            db.commit()
+            logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
+            return {"success": True, "userbot": res["userbot_username"], "message": "تم إرسال رسالة الاسترداد بنجاح! ⚡"}
 
-            elif res.get("uncontactable_reason") and not res.get("can_retry", True):
-                # STRICTLY for permanent Telegram user privacy restrictions or blocked/deleted accounts
-                case.status = "UNCONTACTABLE"
-                case.contactable = False
-                case.uncontactable_reason = res["uncontactable_reason"]
-                db.commit()
-                logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
+        elif res.get("uncontactable_reason") and not res.get("can_retry", True):
+            # Permanent Telegram user privacy restriction or deleted account
+            case.status = "UNCONTACTABLE"
+            case.contactable = False
+            case.uncontactable_reason = res["uncontactable_reason"]
+            db.commit()
+            logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
+            return {"success": False, "error": res.get("error_ar") or res.get("error")}
 
-            elif res.get("can_retry", True):
-                # Temporary bot quota, cooldown, or network delay -> POSTPONE, DO NOT mark uncontactable!
-                retry_seconds = res.get("retry_delay_seconds", 300)
-                case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
-                db.commit()
-                logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
+        elif res.get("can_retry", True):
+            # Temporary backoff delay
+            retry_seconds = res.get("retry_delay_seconds", 30)
+            case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
+            db.commit()
+            logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
+            return {"success": False, "error": res.get("error_ar") or res.get("error"), "retry_delay": retry_seconds}
+
+        return res
+
+    async def process_pending_recovery_contacts(self, db: Session):
+        """
+        Executes scheduled initial recovery contacts immediately.
+        Processes batches of up to 20 cases with minimal fast pacing.
+        """
+        now = datetime.now(timezone.utc)
+        pending_cases = db.query(RecoveryCase).filter(
+            RecoveryCase.status == "SCHEDULED",
+            RecoveryCase.scheduled_contact_at <= now
+        ).order_by(RecoveryCase.created_at.desc()).limit(20).all()
+
+        if not pending_cases:
+            return
+
+        for case in pending_cases:
+            await self.send_recovery_to_case(db, case)
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """
