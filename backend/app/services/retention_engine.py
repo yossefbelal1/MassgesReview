@@ -392,6 +392,7 @@ class RetentionEngine:
         Dispatches initial win-back outreach message immediately to a specific recovery case.
         Used by background worker loop and direct UI 'إرسال فوراً' action.
         """
+        now = datetime.now(timezone.utc)
         channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
         if not channel:
             return {"success": False, "error": "CHANNEL_NOT_FOUND"}

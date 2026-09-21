@@ -378,7 +378,7 @@ async def send_case_now_direct(
         "success": res.get("success", False),
         "status": case.status,
         "userbot": case.assigned_userbot,
-        "message": res.get("message") or res.get("error") or "تمت المحاولة."
+        "message": res.get("message") or res.get("error_ar") or res.get("error") or "تمت المحاولة."
     }
 
 
