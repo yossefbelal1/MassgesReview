@@ -148,12 +148,15 @@ class RetentionEngine:
                 event_date = ev.date.replace(tzinfo=timezone.utc) if ev.date.tzinfo is None else ev.date
 
                 # Fetch member entity details
-                first_name, last_name, username = None, None, None
+                first_name, last_name, username, access_hash = None, None, None, None
                 try:
                     user_entity = await client.get_entity(ev.user_id)
                     first_name = getattr(user_entity, 'first_name', None)
                     last_name = getattr(user_entity, 'last_name', None)
                     username = getattr(user_entity, 'username', None)
+                    raw_hash = getattr(user_entity, 'access_hash', None)
+                    if raw_hash is not None:
+                        access_hash = str(raw_hash)
                 except Exception:
                     pass
 
@@ -169,7 +172,8 @@ class RetentionEngine:
                         event_date=event_date,
                         first_name=first_name,
                         last_name=last_name,
-                        username=username
+                        username=username,
+                        access_hash=access_hash
                     )
 
                 # ── Handle JOIN / REJOIN ─────────────────────────────────────
@@ -187,7 +191,8 @@ class RetentionEngine:
                         event_date=event_date,
                         first_name=first_name,
                         last_name=last_name,
-                        username=username
+                        username=username,
+                        access_hash=access_hash
                     )
 
             if max_seen_id > last_id:
@@ -209,7 +214,8 @@ class RetentionEngine:
         event_date: datetime,
         first_name: Optional[str],
         last_name: Optional[str],
-        username: Optional[str]
+        username: Optional[str],
+        access_hash: Optional[str] = None
     ):
         """Processes a detected member leave event with idempotency."""
         # Find or create AudienceMember
@@ -223,6 +229,7 @@ class RetentionEngine:
                 tenant_id=channel.tenant_id,
                 channel_id=channel.id,
                 telegram_user_id=telegram_user_id,
+                access_hash=access_hash,
                 first_name=first_name,
                 last_name=last_name,
                 username=username,
@@ -235,6 +242,7 @@ class RetentionEngine:
         else:
             member.status = "LEFT"
             member.last_left_at = event_date
+            if access_hash: member.access_hash = access_hash
             if first_name: member.first_name = first_name
             if last_name: member.last_name = last_name
             if username: member.username = username
@@ -303,7 +311,8 @@ class RetentionEngine:
         event_date: datetime,
         first_name: Optional[str],
         last_name: Optional[str],
-        username: Optional[str]
+        username: Optional[str],
+        access_hash: Optional[str] = None
     ):
         """Processes a detected join/rejoin event and attributes win-back."""
         member = db.query(AudienceMember).filter(
@@ -318,6 +327,7 @@ class RetentionEngine:
                 tenant_id=channel.tenant_id,
                 channel_id=channel.id,
                 telegram_user_id=telegram_user_id,
+                access_hash=access_hash,
                 first_name=first_name,
                 last_name=last_name,
                 username=username,
@@ -329,6 +339,7 @@ class RetentionEngine:
         else:
             member.status = "ACTIVE"
             member.last_rejoined_at = event_date
+            if access_hash: member.access_hash = access_hash
             if first_name: member.first_name = first_name
             if last_name: member.last_name = last_name
             if username: member.username = username
@@ -366,7 +377,8 @@ class RetentionEngine:
 
         # ── Welcome Flow for new members ─────────────────────────────────────
         if is_new_member and settings.is_welcome_enabled and settings.welcome_message_template:
-            await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name)
+            int_hash = int(access_hash) if access_hash else None
+            await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name, username, int_hash)
 
     async def process_pending_recovery_contacts(self, db: Session):
         """
@@ -398,12 +410,20 @@ class RetentionEngine:
         )
         outbound_text = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
 
-        # Attempt sending via UserbotPool
+        # Attempt sending via UserbotPool with access_hash if available
+        access_hash = None
+        if case.member and case.member.access_hash:
+            try:
+                access_hash = int(case.member.access_hash)
+            except (ValueError, TypeError):
+                access_hash = None
+
         res = await userbot_pool.send_direct_message(
             target_user_id=int(case.telegram_user_id),
             text=outbound_text,
             channel_id=channel.id,
-            target_username=username
+            target_username=username,
+            access_hash=access_hash
         )
 
         if res["success"]:
@@ -537,14 +557,16 @@ class RetentionEngine:
         finally:
             db.close()
 
-    async def _trigger_welcome_message(self, channel: Channel, settings: RetentionSetting, telegram_user_id: str, first_name: Optional[str]):
+    async def _trigger_welcome_message(self, channel: Channel, settings: RetentionSetting, telegram_user_id: str, first_name: Optional[str], username: Optional[str] = None, access_hash: Optional[int] = None):
         """Delivers welcome message to new joiner."""
         name_display = first_name or "صديقنا العزيز"
         text = settings.welcome_message_template.replace("{name}", name_display).replace("{channel}", channel.title)
         await userbot_pool.send_direct_message(
             target_user_id=int(telegram_user_id),
             text=text,
-            channel_id=channel.id
+            channel_id=channel.id,
+            target_username=username,
+            access_hash=access_hash
         )
 
 retention_engine = RetentionEngine()

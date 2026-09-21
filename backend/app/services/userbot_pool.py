@@ -146,7 +146,8 @@ class UserbotPool:
         text: str,
         channel_id: Optional[str] = None,
         preferred_session: Optional[str] = None,
-        target_username: Optional[str] = None
+        target_username: Optional[str] = None,
+        access_hash: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Sends a direct private message to a Telegram user.
@@ -178,12 +179,17 @@ class UserbotPool:
             await asyncio.sleep(random.uniform(8.0, 14.0))
 
         try:
-            # Resolve entity: prefer username if available, else target_user_id
-            target = target_username if target_username else target_user_id
-            try:
-                entity = await client.get_entity(target)
-            except Exception:
-                entity = target_user_id
+            # 1. If access_hash is provided, use InputPeerUser directly (100% reliable across restarts)
+            if access_hash:
+                from telethon.tl.types import InputPeerUser
+                entity = InputPeerUser(int(target_user_id), int(access_hash))
+            elif target_username:
+                entity = target_username
+            else:
+                try:
+                    entity = await client.get_entity(target_user_id)
+                except Exception:
+                    entity = target_user_id
 
             # Send message
             sent_msg = await client.send_message(entity, text)
@@ -239,7 +245,7 @@ class UserbotPool:
             alternate = [s for s in self.sessions if s != session and s.is_healthy]
             if alternate:
                 logger.info(f"[🔄 Failover]: Re-attempting via alternate session {alternate[0].name}...")
-                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username)
+                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
 
             return {
                 "success": False,
@@ -255,7 +261,7 @@ class UserbotPool:
 
             alternate = [s for s in self.sessions if s != session and s.is_healthy]
             if alternate:
-                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username)
+                return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
 
             return {
                 "success": False,

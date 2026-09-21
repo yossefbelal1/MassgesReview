@@ -267,13 +267,20 @@ async def send_manual_case_message(
         raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
 
     username = case.member.username if case.member else None
+    access_hash = None
+    if case.member and case.member.access_hash:
+        try:
+            access_hash = int(case.member.access_hash)
+        except (ValueError, TypeError):
+            access_hash = None
 
     res = await userbot_pool.send_direct_message(
         target_user_id=int(case.telegram_user_id),
         text=payload.text,
         channel_id=case.channel_id,
         preferred_session=case.assigned_userbot,
-        target_username=username
+        target_username=username,
+        access_hash=access_hash
     )
 
     if not res["success"]:

@@ -270,6 +270,7 @@ class AudienceMember(Base):
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
     telegram_user_id = Column(String, index=True, nullable=False)
+    access_hash = Column(String(64), nullable=True)
     username = Column(String, nullable=True)
     first_name = Column(String, nullable=True)
     last_name = Column(String, nullable=True)
