@@ -250,8 +250,8 @@ class UserbotPool:
             }
 
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Initiating cooldown.")
-            session.cooldown_until = time.time() + 1200
+            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Brief cooldown of 60s.")
+            session.cooldown_until = time.time() + 60
             session.last_error = "PeerFloodError"
 
             # Failover to secondary session if healthy
@@ -263,9 +263,9 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "حساب اليوزربوت مقيد مؤقتاً من تيليجرام لمراسلة غير جهات الاتصال (PeerFlood). يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة من حسابك.",
+                "error_ar": "حساب اليوزربوت مقيد مؤقتاً لدقيقة واحدة من تيليجرام لمراسلة غير جهات الاتصال. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة من حسابك.",
                 "can_retry": True,
-                "retry_delay_seconds": 1200
+                "retry_delay_seconds": 60
             }
 
         except FloodWaitError as fwe:

@@ -437,16 +437,16 @@ class DedicatedUserbotService:
                 "can_retry": False
             }
         except PeerFloodError:
-            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=20)
+            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=1)
             userbot.status = "FLOOD_WAIT"
             userbot.last_error = "PeerFloodError from Telegram"
             db.commit()
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "الحساب مقيد مؤقتاً من تيليجرام لمراسلة غير جهات الاتصال.",
+                "error_ar": "الحساب مقيد مؤقتاً لدقيقة واحدة من تيليجرام لمراسلة غير جهات الاتصال.",
                 "can_retry": True,
-                "retry_delay_seconds": 1200
+                "retry_delay_seconds": 60
             }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))
