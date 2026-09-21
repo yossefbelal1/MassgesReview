@@ -99,7 +99,7 @@ class RetentionEngine:
                 tenant_id=channel.tenant_id,
                 channel_id=channel.id,
                 is_retention_enabled=True,
-                initial_delay_seconds=180,
+                initial_delay_seconds=5,
                 max_daily_contacts=30
             )
             db.add(settings)
@@ -262,9 +262,9 @@ class RetentionEngine:
             logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
             return
 
-        # Schedule recovery contact with safe staggering
+        # Schedule recovery contact immediately or after configured fast delay
         now = datetime.now(timezone.utc)
-        delay_sec = settings.initial_delay_seconds if settings.initial_delay_seconds is not None else 180
+        delay_sec = settings.initial_delay_seconds if settings.initial_delay_seconds is not None else 5
 
         # Check if leave happened in the past (e.g. historical admin log read)
         is_historical = (now - event_date).total_seconds() > (48 * 3600)
@@ -275,17 +275,21 @@ class RetentionEngine:
             scheduled_at = None
         else:
             initial_status = "SCHEDULED"
-            if event_date + timedelta(seconds=delay_sec) <= now:
-                # Distribute outreach so cases don't fire concurrently
-                from sqlalchemy import func
-                max_sched = db.query(func.max(RecoveryCase.scheduled_contact_at)).filter(
-                    RecoveryCase.channel_id == channel.id,
-                    RecoveryCase.status == "SCHEDULED"
-                ).scalar()
-                base_time = max(now, max_sched if max_sched else now)
-                scheduled_at = base_time + timedelta(seconds=30)
+            target_time = max(now, event_date + timedelta(seconds=delay_sec))
+
+            # Avoid concurrent collision if another case is already queued in the next 15 seconds
+            from sqlalchemy import func
+            recent_sched = db.query(func.max(RecoveryCase.scheduled_contact_at)).filter(
+                RecoveryCase.channel_id == channel.id,
+                RecoveryCase.status == "SCHEDULED",
+                RecoveryCase.scheduled_contact_at >= now,
+                RecoveryCase.scheduled_contact_at <= now + timedelta(seconds=15)
+            ).scalar()
+
+            if recent_sched:
+                scheduled_at = recent_sched + timedelta(seconds=4)
             else:
-                scheduled_at = event_date + timedelta(seconds=delay_sec)
+                scheduled_at = target_time
 
         case = RecoveryCase(
             tenant_id=channel.tenant_id,
@@ -383,87 +387,95 @@ class RetentionEngine:
     async def process_pending_recovery_contacts(self, db: Session):
         """
         Executes scheduled initial recovery contacts that are due.
-        Processes safely one case per loop with respectful anti-spam pacing.
+        Processes up to 3 cases per cycle with rapid turnaround and anti-spam protection.
         """
         now = datetime.now(timezone.utc)
-        pending_case = db.query(RecoveryCase).filter(
+        pending_cases = db.query(RecoveryCase).filter(
             RecoveryCase.status == "SCHEDULED",
             RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.scheduled_contact_at.asc()).first()
+        ).order_by(RecoveryCase.created_at.desc()).limit(3).all()
 
-        if not pending_case:
+        if not pending_cases:
             return
 
-        case = pending_case
-        channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
-        if not channel:
-            return
+        for case in pending_cases:
+            channel = db.query(Channel).filter(Channel.id == case.channel_id).first()
+            if not channel:
+                continue
 
-        settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
-        first_name = case.member.first_name if case.member else "يا غالي"
-        username = case.member.username if case.member else None
+            settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
+            first_name = case.member.first_name if case.member else "يا غالي"
+            username = case.member.username if case.member else None
 
-        # Default empathetic, respectful recovery opener (Owner In-Touch)
-        default_template = (
-            "السلام عليكم، أنا صاحب قناة {channel} 🌹 لاحظت خروجك من القناة وحبينا نتطمن عليك.\n"
-            "يا ريت نعرف السبب حتى نحسن من أداء القناة؟"
-        )
-        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
-        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
-
-        outbound_text = template.replace("{name}", first_name or "يا غالي")\
-                                .replace("{channel}", channel.title)\
-                                .replace("{invite_link}", invite_url)
-
-        # Attempt sending via UserbotPool with access_hash if available
-        access_hash = None
-        if case.member and case.member.access_hash:
-            try:
-                access_hash = int(case.member.access_hash)
-            except (ValueError, TypeError):
-                access_hash = None
-
-        res = await userbot_pool.send_direct_message(
-            target_user_id=int(case.telegram_user_id),
-            text=outbound_text,
-            channel_id=channel.id,
-            target_username=username,
-            access_hash=access_hash
-        )
-
-        if res["success"]:
-            case.status = "CONTACTED"
-            case.contactable = True
-            case.assigned_userbot = res["userbot_username"]
-            case.first_contacted_at = now
-            case.uncontactable_reason = None
-
-            msg = RecoveryMessage(
-                case_id=case.id,
-                direction="OUTBOUND",
-                sender_type="USERBOT",
-                userbot_username=res["userbot_username"],
-                text=outbound_text,
-                sent_at=now
+            # Empathetic, respectful recovery opener with direct invite link
+            default_template = (
+                "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
+                "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
+                "{invite_link}"
             )
-            db.add(msg)
-            db.commit()
-            logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
+            template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+            invite_url = settings.invite_link if (settings and settings.invite_link) else ""
 
-        elif res.get("uncontactable_reason") and not res.get("can_retry", True):
-            # STRICTLY for permanent Telegram user privacy restrictions or blocked/deleted accounts
-            case.status = "UNCONTACTABLE"
-            case.contactable = False
-            case.uncontactable_reason = res["uncontactable_reason"]
-            db.commit()
-            logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
+            # Ensure invite link is always included if configured
+            if invite_url:
+                if "{invite_link}" in template:
+                    template = template.replace("{invite_link}", invite_url)
+                else:
+                    template = f"{template.rstrip()}\n\n{invite_url}"
 
-        elif res.get("can_retry", True):
-            # Temporary bot quota, cooldown, or network delay -> POSTPONE, DO NOT mark uncontactable!
-            retry_seconds = res.get("retry_delay_seconds", 900)
-            case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
-            db.commit()
-            logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
+            outbound_text = template.replace("{name}", first_name or "يا غالي")\
+                                    .replace("{channel}", channel.title)\
+                                    .replace("{invite_link}", invite_url or "")
+
+            # Attempt sending via UserbotPool with access_hash if available
+            access_hash = None
+            if case.member and case.member.access_hash:
+                try:
+                    access_hash = int(case.member.access_hash)
+                except (ValueError, TypeError):
+                    access_hash = None
+
+            res = await userbot_pool.send_direct_message(
+                target_user_id=int(case.telegram_user_id),
+                text=outbound_text,
+                channel_id=channel.id,
+                target_username=username,
+                access_hash=access_hash
+            )
+
+            if res["success"]:
+                case.status = "CONTACTED"
+                case.contactable = True
+                case.assigned_userbot = res["userbot_username"]
+                case.first_contacted_at = now
+                case.uncontactable_reason = None
+
+                msg = RecoveryMessage(
+                    case_id=case.id,
+                    direction="OUTBOUND",
+                    sender_type="USERBOT",
+                    userbot_username=res["userbot_username"],
+                    text=outbound_text,
+                    sent_at=now
+                )
+                db.add(msg)
+                db.commit()
+                logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
+
+            elif res.get("uncontactable_reason") and not res.get("can_retry", True):
+                # STRICTLY for permanent Telegram user privacy restrictions or blocked/deleted accounts
+                case.status = "UNCONTACTABLE"
+                case.contactable = False
+                case.uncontactable_reason = res["uncontactable_reason"]
+                db.commit()
+                logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
+
+            elif res.get("can_retry", True):
+                # Temporary bot quota, cooldown, or network delay -> POSTPONE, DO NOT mark uncontactable!
+                retry_seconds = res.get("retry_delay_seconds", 300)
+                case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
+                db.commit()
+                logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

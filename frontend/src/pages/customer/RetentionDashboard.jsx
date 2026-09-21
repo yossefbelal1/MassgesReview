@@ -10,10 +10,10 @@ import {
 const WINBACK_TEMPLATES = [
   {
     id: 'owner_in_touch',
-    title: 'صاحب القناة (ودود واستفسار وتطوير) ⭐ موصى به',
-    badge: 'الأعلى تفاعلاً',
-    desc: 'رسالة شخصية من صاحب القناة للاطمئنان على العضو ومعرفة سبب الخروج لتحسين القناة',
-    text: 'السلام عليكم، أنا صاحب قناة {channel} 🌹 لاحظت خروجك من القناة وحبينا نتطمن عليك.\nيا ريت نعرف السبب حتى نحسن من أداء القناة؟'
+    title: 'اطمئنان واستفسار مع رابط العودة المباشر ⭐ موصى به',
+    badge: 'الأعلى تفاعلاً وسرعة',
+    desc: 'رسالة ودية للاطمئنان على العضو ومعرفة سبب الخروج مع إرسال رابط العودة مباشرة',
+    text: 'مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n{invite_link}'
   },
   {
     id: 'mistake_rejoin',
@@ -27,14 +27,14 @@ const WINBACK_TEMPLATES = [
     title: 'استطلاع رأي المحتوى والإعلانات',
     badge: 'فهم الأسباب',
     desc: 'سؤال مباشر لمعرفة هل كثرة الإشعارات أو عدم ملاءمة المحتوى سبب الخروج',
-    text: 'مرحباً يا {name} 🌟 يهمنا جداً رأيك، لاحظنا مغادرتك لـ {channel}، حابين نعرف هل المحتوى لم يناسبك أم الإعلانات والإشعارات كانت مزعجة؟ رأيك يساعدنا على التطوير 💡'
+    text: 'مرحباً يا {name} 🌟 يهمنا جداً رأيك، لاحظنا مغادرتك لـ {channel}، حابين نعرف هل المحتوى لم يناسبك أم الإعلانات والإشعارات كانت مزعجة؟ رأيك يساعدنا على التطوير 💡\n\n{invite_link}'
   },
   {
     id: 'exclusive_content',
     title: 'ميزات وتحديثات حصرية قادمة',
     badge: 'تحفيز العودة',
     desc: 'إشعار العضو بأن هناك صفقات ومحتوى حصري قادم تم إعداده خصيصاً',
-    text: 'أهلاً {name} 🎁 بصفتك عضواً في {channel}، جهزنا محتوى وتحديثات حصرية هذا الأسبوع وحبينا نتطمن عليك. هل تحب نرسل لك رابط العودة؟'
+    text: 'أهلاً {name} 🎁 بصفتك عضواً في {channel}، جهزنا محتوى وتحديثات حصرية هذا الأسبوع وحبينا نتطمن عليك. تفضل رابط العودة:\n\n{invite_link}'
   }
 ];
 
@@ -70,10 +70,10 @@ export default function RetentionDashboard({ onNavigate }) {
   const [settingsForm, setSettingsForm] = useState({
     is_retention_enabled: true,
     is_welcome_enabled: false,
-    initial_delay_value: 3,
-    initial_delay_unit: 'minutes',
+    initial_delay_value: 5,
+    initial_delay_unit: 'seconds',
     welcome_message_template: '',
-    recovery_first_message_template: '',
+    recovery_first_message_template: WINBACK_TEMPLATES[0].text,
     invite_link: '',
     max_daily_contacts: 30
   });
@@ -117,7 +117,7 @@ export default function RetentionDashboard({ onNavigate }) {
       } else if (activeTab === 'settings' && selectedChannelId) {
         const setRes = await apiClient.get(`/retention/settings/${selectedChannelId}`);
         setSettings(setRes.data);
-        const sSec = setRes.data.initial_delay_seconds || 180;
+        const sSec = (setRes.data.initial_delay_seconds !== undefined && setRes.data.initial_delay_seconds !== null) ? setRes.data.initial_delay_seconds : 5;
         const isMin = sSec >= 60 && sSec % 60 === 0;
         setSettingsForm({
           is_retention_enabled: setRes.data.is_retention_enabled,
@@ -125,7 +125,7 @@ export default function RetentionDashboard({ onNavigate }) {
           initial_delay_value: isMin ? sSec / 60 : sSec,
           initial_delay_unit: isMin ? 'minutes' : 'seconds',
           welcome_message_template: setRes.data.welcome_message_template || '',
-          recovery_first_message_template: setRes.data.recovery_first_message_template || '',
+          recovery_first_message_template: setRes.data.recovery_first_message_template || WINBACK_TEMPLATES[0].text,
           invite_link: setRes.data.invite_link || '',
           max_daily_contacts: setRes.data.max_daily_contacts || 30
         });
@@ -759,28 +759,62 @@ export default function RetentionDashboard({ onNavigate }) {
 
             {/* Initial Delay */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                فترة الانتظار قبل بدء أول تواصل بعد المغادرة
-              </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                <label className="text-xs font-semibold text-slate-300">
+                  فترة وسرعة إرسال رسالة الاسترداد بعد مغادرة العضو
+                </label>
+                <span className="text-emerald-400 text-[11px] font-bold">⚡ موصى به: فوري (5 - 15 ثانية)</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="number"
-                  min="1"
+                  min="0"
                   max="120"
                   value={settingsForm.initial_delay_value}
                   onChange={(e) => setSettingsForm({ ...settingsForm, initial_delay_value: e.target.value })}
-                  className="w-32 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                  className="w-24 px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
                 />
                 <select
                   value={settingsForm.initial_delay_unit}
                   onChange={(e) => setSettingsForm({ ...settingsForm, initial_delay_unit: e.target.value })}
                   className="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs font-bold outline-none cursor-pointer"
                 >
-                  <option value="minutes">دقائق (موصى به: 3 دقائق)</option>
-                  <option value="seconds">ثواني</option>
+                  <option value="seconds">ثواني (إرسال فوري وسريع ⚡)</option>
+                  <option value="minutes">دقائق</option>
                 </select>
+                {/* Fast presets */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setSettingsForm({ ...settingsForm, initial_delay_value: 5, initial_delay_unit: 'seconds' })}
+                    className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[11px] font-bold border border-emerald-500/20 transition-all"
+                  >
+                    فوري (5 ثواني) ⚡
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsForm({ ...settingsForm, initial_delay_value: 15, initial_delay_unit: 'seconds' })}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition-all"
+                  >
+                    15 ثانية
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsForm({ ...settingsForm, initial_delay_value: 30, initial_delay_unit: 'seconds' })}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition-all"
+                  >
+                    30 ثانية
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsForm({ ...settingsForm, initial_delay_value: 1, initial_delay_unit: 'minutes' })}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold transition-all"
+                  >
+                    دقيقة واحدة
+                  </button>
+                </div>
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">تمنح العضو فرصة للعودة بنفسه دون الشعور بالملاحقة الفورية.</p>
+              <p className="text-[10px] text-slate-400 mt-1">كلما كانت المراسلة أسرع بعد المغادرة مباشرة، كلما تضاعف معدل فتح الرسالة وعودة العضو قبل أن ينشغل.</p>
             </div>
 
             {/* Channel Rejoin Link */}
@@ -1196,10 +1230,10 @@ export default function RetentionDashboard({ onNavigate }) {
               <span className="text-slate-500 font-semibold whitespace-nowrap">قوالب جاهزة:</span>
               <button
                 type="button"
-                onClick={() => setManualText(`السلام عليكم، أنا صاحب قناة ${selectedCase?.channel_title || 'القناة'} 🌹 لاحظت خروجك وحبينا نتطمن عليك. يا ريت نعرف السبب حتى نحسن من أداء القناة؟`)}
+                onClick={() => setManualText(`مرحباً ${selectedCase?.user_full_name ? selectedCase.user_full_name.split(' ')[0] : 'يا غالي'}، لاحظنا مغادرتك لقناة ${selectedCase?.channel_title || 'القناة'} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n${settings?.invite_link || ''}`)}
                 className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 whitespace-nowrap transition-colors font-bold"
               >
-                صاحب القناة 🌹
+                اطمئنان مع الرابط 🌹
               </button>
               <button
                 type="button"

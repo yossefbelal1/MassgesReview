@@ -252,7 +252,7 @@ class RetentionSetting(Base):
     channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), unique=True, nullable=False)
     is_retention_enabled = Column(Boolean, default=True)
     is_welcome_enabled = Column(Boolean, default=False)
-    initial_delay_seconds = Column(Integer, default=180)  # Default 3 mins delay before recovery contact
+    initial_delay_seconds = Column(Integer, default=5)  # Default 5s delay for fast recovery contact
     welcome_message_template = Column(Text, nullable=True)
     recovery_first_message_template = Column(Text, nullable=True)
     invite_link = Column(String, nullable=True)

@@ -143,7 +143,7 @@ async def retention_channel_watcher():
             if "disconnected" in err_str or "connection" in err_str:
                 await telegram_service.ensure_connected()
 
-        await asyncio.sleep(6.0)
+        await asyncio.sleep(3.0)
 
 async def worker_job_executor():
     """

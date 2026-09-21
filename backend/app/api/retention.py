@@ -412,7 +412,7 @@ def get_channel_retention_settings(
             tenant_id=tenant_id,
             channel_id=channel_id,
             is_retention_enabled=True,
-            initial_delay_seconds=180,
+            initial_delay_seconds=5,
             max_daily_contacts=30
         )
         db.add(settings)
