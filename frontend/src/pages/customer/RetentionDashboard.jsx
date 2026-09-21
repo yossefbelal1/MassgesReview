@@ -179,11 +179,11 @@ export default function RetentionDashboard({ onNavigate }) {
   const handleRequestUserbotCode = async (e) => {
     e.preventDefault();
     if (!selectedChannelId) {
-      alert('يرجى اختيار القناة أولاً لربط اليوزربوت بها.');
+      showToast('يرجى اختيار القناة أولاً لربط اليوزربوت بها.', 'error');
       return;
     }
     if (!userbotForm.api_id || !userbotForm.api_hash || !userbotForm.phone) {
-      alert('يرجى كتابة الـ API ID و API HASH ورقم الهاتف كاملاً بصيغته الدولية.');
+      showToast('يرجى كتابة الـ API ID و API HASH ورقم الهاتف كاملاً بصيغته الدولية.', 'error');
       return;
     }
 
@@ -200,9 +200,9 @@ export default function RetentionDashboard({ onNavigate }) {
       setNeeds2fa(false);
       setVerifyCode('');
       setVerifyPassword('');
-      alert(res.data.message || 'تم إرسال كود التحقق بنجاح! تفقد تطبيق تيليجرام.');
+      showToast(res.data.message || 'تم إرسال كود التحقق بنجاح! تفقد تطبيق تيليجرام 📲', 'success');
     } catch (err) {
-      alert('فشل طلب الكود: ' + (err.response?.data?.detail || err.message));
+      showToast('فشل طلب الكود: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setSendingOtp(false);
     }
@@ -211,7 +211,7 @@ export default function RetentionDashboard({ onNavigate }) {
   const handleVerifyUserbotCode = async (e) => {
     e.preventDefault();
     if (!verifyCode.trim()) {
-      alert('يرجى إدخال كود التحقق المستلم في تطبيق تيليجرام.');
+      showToast('يرجى إدخال كود التحقق المستلم في تطبيق تيليجرام.', 'error');
       return;
     }
 
@@ -225,11 +225,11 @@ export default function RetentionDashboard({ onNavigate }) {
 
       if (res.data.needs_2fa) {
         setNeeds2fa(true);
-        alert(res.data.message || 'حسابك محمي بالتحقق بخطوتين (2FA). يرجى إدخال كلمة المرور السحابية.');
+        showToast(res.data.message || 'حسابك محمي بالتحقق بخطوتين (2FA). يرجى إدخال كلمة المرور السحابية.', 'error');
         return;
       }
 
-      alert(res.data.message || 'تم ربط الحساب بنجاح! 🎉');
+      showToast(res.data.message || 'تم ربط الحساب بنجاح! 🎉', 'success');
       setUserbotStep(1);
       setUserbotForm({ api_id: '', api_hash: '', phone: '' });
       setVerifyCode('');
@@ -237,7 +237,7 @@ export default function RetentionDashboard({ onNavigate }) {
       setNeeds2fa(false);
       fetchData();
     } catch (err) {
-      alert('فشل التحقق: ' + (err.response?.data?.detail || err.message));
+      showToast('فشل التحقق: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setVerifyingOtp(false);
     }
@@ -252,11 +252,11 @@ export default function RetentionDashboard({ onNavigate }) {
     try {
       setActionLoading(true);
       const res = await apiClient.delete(`/retention/userbot/${selectedChannelId}`);
-      alert(res.data?.message || 'تم فصل اليوزربوت بنجاح.');
+      showToast(res.data?.message || 'تم فصل اليوزربوت بنجاح.', 'success');
       setDedicatedUserbot(null);
       fetchData();
     } catch (err) {
-      alert('فشل فصل الحساب: ' + (err.response?.data?.detail || err.message));
+      showToast('فشل فصل الحساب: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setActionLoading(false);
     }
@@ -267,12 +267,12 @@ export default function RetentionDashboard({ onNavigate }) {
     if (!file || !selectedChannelId) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('يرجى اختيار ملف صورة صالح (JPEG أو PNG)');
+      showToast('يرجى اختيار ملف صورة صالح (JPEG أو PNG)', 'error');
       return;
     }
 
     if (file.size > 10 * 1024 * 1024) {
-      alert('حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)');
+      showToast('حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)', 'error');
       return;
     }
 
@@ -284,11 +284,11 @@ export default function RetentionDashboard({ onNavigate }) {
       const res = await apiClient.post(`/retention/userbot/${selectedChannelId}/avatar`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      alert(res.data?.message || 'تم تحديث صورة بروفايل اليوزربوت بنجاح! 🎉');
+      showToast(res.data?.message || 'تم تحديث صورة بروفايل اليوزربوت بنجاح! 🎉', 'success');
       setAvatarTimestamp(Date.now());
       fetchData();
     } catch (err) {
-      alert('فشل رفع الصورة: ' + (err.response?.data?.detail || err.message));
+      showToast('فشل رفع الصورة: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setUploadingAvatar(false);
     }
@@ -301,7 +301,7 @@ export default function RetentionDashboard({ onNavigate }) {
       const res = await apiClient.get(`/retention/cases/${c.id}`);
       setCaseMessages(res.data.messages || []);
     } catch (err) {
-      alert('فشل تحميل سجل المحادثة');
+      showToast('فشل تحميل سجل المحادثة', 'error');
     } finally {
       setModalLoading(false);
     }
@@ -377,9 +377,10 @@ export default function RetentionDashboard({ onNavigate }) {
       setCaseMessages(prev => [...prev, res.data]);
       setManualText('');
       setSelectedCase(prev => ({ ...prev, status: 'CONVERSATION_ACTIVE', contactable: true }));
+      showToast('تم إرسال الرسالة بنجاح 📩', 'success');
       fetchData();
     } catch (err) {
-      alert(err.response?.data?.detail || 'فشل إرسال الرسالة');
+      showToast(err.response?.data?.detail || 'فشل إرسال الرسالة', 'error');
     } finally {
       setSendingMessage(false);
     }
@@ -453,9 +454,9 @@ export default function RetentionDashboard({ onNavigate }) {
         invite_link: settingsForm.invite_link,
         max_daily_contacts: parseInt(settingsForm.max_daily_contacts) || 30
       });
-      alert('تم حفظ إعدادات الاسترداد والترحيب بنجاح! 🚀');
+      showToast('تم حفظ إعدادات الاسترداد والترحيب بنجاح! 🚀', 'success');
     } catch (err) {
-      alert(err.response?.data?.detail || 'فشل حفظ الإعدادات');
+      showToast(err.response?.data?.detail || 'فشل حفظ الإعدادات', 'error');
     } finally {
       setSavingSettings(false);
     }
