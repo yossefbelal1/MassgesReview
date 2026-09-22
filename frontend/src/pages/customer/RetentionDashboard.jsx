@@ -547,11 +547,8 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         <div>
           <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
             <UserCheck className="w-5 h-5 text-emerald-400" />
-            <span>نظام استعادة ومتابعة الأعضاء (Retention & Win-back)</span>
+            <span>استرداد الأعضاء</span>
           </h1>
-          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-            رصد مغادرة الأعضاء آلياً، والتواصل معهم ذكياً، وفهم الأسباب، وإعادتهم لقناتك تلقائياً.
-          </p>
         </div>
 
         {/* Channel Selector */}
@@ -561,7 +558,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             <select
               value={selectedChannelId}
               onChange={(e) => setSelectedChannelId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 min-h-[40px]"
+              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 min-h-[38px]"
             >
               <option value="">جميع القنوات</option>
               {channels.map((ch) => (
@@ -572,44 +569,47 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         )}
       </div>
 
-      {/* Executive KPI Cards */}
+      {/* KPI Metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {/* Win-back Rate */}
-        <div className="col-span-2 sm:col-span-1 p-4 rounded-2xl bg-gradient-to-br from-emerald-950/60 to-slate-900 border border-emerald-500/30 shadow-lg">
-          <span className="text-[11px] font-semibold text-emerald-400 block mb-1">معدل الاسترداد (Win-back)</span>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl sm:text-3xl font-extrabold text-white font-mono">{summary?.win_back_rate_percent || 0}%</span>
-            <span className="text-[10px] text-emerald-400 font-bold">🎯 نسبة النجاح</span>
+        <div className="col-span-2 sm:col-span-1 p-4 rounded-xl bg-slate-900/90 border border-emerald-500/30">
+          <span className="text-xs text-emerald-400 font-medium block">معدل الاسترداد</span>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-2xl font-bold text-white font-mono">{summary?.win_back_rate_percent || 0}%</span>
+            <span className="text-[11px] text-slate-400">({summary?.total_rejoined || 0} من {summary?.total_left_detected || 0})</span>
           </div>
-          <span className="text-[10px] text-slate-400 mt-1 block">من إجمالي الأعضاء المغادرين</span>
         </div>
 
         {/* Total Left */}
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-400 block mb-1">إجمالي المغادرين</span>
-          <span className="text-xl sm:text-2xl font-bold text-white font-mono">{summary?.total_left_detected || 0}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">عضو تم رصدهم</span>
+        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+          <span className="text-xs text-slate-400 font-medium block">إجمالي المغادرين</span>
+          <div className="mt-1">
+            <span className="text-2xl font-bold text-white font-mono">{summary?.total_left_detected || 0}</span>
+          </div>
         </div>
 
         {/* Contacted */}
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm">
-          <span className="text-[11px] font-semibold text-blue-400 block mb-1">تم التواصل تلقائياً</span>
-          <span className="text-xl sm:text-2xl font-bold text-white font-mono">{summary?.total_contacted || 0}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">محادثة أطلقها اليوزربوت</span>
+        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+          <span className="text-xs text-slate-400 font-medium block">تم التواصل</span>
+          <div className="mt-1">
+            <span className="text-2xl font-bold text-white font-mono">{summary?.total_contacted || 0}</span>
+          </div>
         </div>
 
         {/* Rejoined */}
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm">
-          <span className="text-[11px] font-semibold text-emerald-400 block mb-1">أعضاء عادوا للقناة</span>
-          <span className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono">{summary?.total_rejoined || 0}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">متوسط العودة: {summary?.average_rejoin_hours || 0} ساعة</span>
+        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+          <span className="text-xs text-emerald-400 font-medium block">عادوا للقناة</span>
+          <div className="mt-1">
+            <span className="text-2xl font-bold text-emerald-400 font-mono">{summary?.total_rejoined || 0}</span>
+          </div>
         </div>
 
-        {/* Privacy Restricted */}
-        <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm">
-          <span className="text-[11px] font-semibold text-slate-400 block mb-1">حماية الخصوصية</span>
-          <span className="text-xl sm:text-2xl font-bold text-slate-300 font-mono">{summary?.uncontactable_count || 0}</span>
-          <span className="text-[10px] text-slate-500 block mt-1">إعدادات خصوصية تيليجرام</span>
+        {/* In Queue */}
+        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
+          <span className="text-xs text-slate-400 font-medium block">في طابور الإرسال</span>
+          <div className="mt-1">
+            <span className="text-2xl font-bold text-amber-400 font-mono">{summary?.total_scheduled_pending || 0}</span>
+          </div>
         </div>
       </div>
 
@@ -671,63 +671,19 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         <div className="space-y-3">
           {/* Dedicated Userbot Alert / Call to Action */}
           {!dedicatedUserbot && (
-            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-slate-900 to-emerald-500/10 border-2 border-amber-500/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl animate-in fade-in">
-              <div className="flex items-start gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5 shadow-inner">
-                  <Zap className="w-6 h-6 animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-white flex items-center gap-2">
-                    <span>خطوة واحدة لتسريع الإرسال ورفع نسبة استرداد الأعضاء (Win-Back Rate) ⚡</span>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">موصى به لقناتك</span>
-                  </h4>
-                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    حساب المنصة المشترك مقيد حالياً بحدود تيليجرام اليومية لمراسلة الغرباء. لإرسال الرسائل فوراً لجميع الأعضاء المغادرين بدون أي انتظار أو توقف وباسم وصورة قناتك:
-                    <strong className="text-emerald-400 font-bold mx-1">اربط رقم تيليجرام الخاص بقناتك في 30 ثانية</strong> (برقم هاتفك فقط)، أو راسلهم مباشرة الآن عبر زر <span className="text-sky-400 font-bold">[تيليجرام ↗]</span> في الجدول بالأسفل.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
-                <button
-                  onClick={() => handleTabSelect('userbots')}
-                  className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-black transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 ring-2 ring-emerald-500/30 cursor-pointer"
-                >
-                  <Bot className="w-4 h-4" />
-                  <span>ربط رقم التيليجرام الآن 📲</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Funnel Mathematical Reconciliation Card */}
-          {summary && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs animate-in fade-in">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-extrabold text-white flex items-center gap-1.5 text-xs">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>مطابقة القمع الحسابية (بيانات حقيقية 100%):</span>
-                </span>
-                <span className="px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 font-mono text-[11px] font-bold">
-                  إجمالي المغادرين: <strong className="text-white">{summary.total_left_detected || 0}</strong>
-                </span>
-                <span className="text-slate-600 font-bold">=</span>
-                <span className="px-2.5 py-1 rounded-xl bg-blue-500/10 text-blue-300 font-mono text-[11px] font-bold border border-blue-500/20">
-                  تم التواصل: <strong className="text-white">{summary.total_contacted || 0}</strong>
-                </span>
-                <span className="text-slate-600 font-bold">+</span>
-                <span className="px-2.5 py-1 rounded-xl bg-purple-500/10 text-purple-300 font-mono text-[11px] font-bold border border-purple-500/20">
-                  في طابور الإرسال: <strong className="text-white">{summary.total_scheduled_pending || 0}</strong>
-                </span>
-                <span className="text-slate-600 font-bold">+</span>
-                <span className="px-2.5 py-1 rounded-xl bg-sky-500/10 text-sky-300 font-mono text-[11px] font-bold border border-sky-500/20">
-                  حماية الخصوصية: <strong className="text-white">{summary.uncontactable_count || 0}</strong>
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="text-slate-300">
+                  الإرسال يعمل عبر حساب المنصة المشترك. لزيادة سرعة الإرسال ومراسلة الأعضاء باسم قناتك، يمكنك ربط رقم خاص بقناتك.
                 </span>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] text-emerald-400 font-extrabold bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl shadow-sm">
-                  🎉 عادوا للقناة (نجاح الاسترداد): {summary.total_rejoined || 0} عضو ({summary.win_back_rate_percent || 0}%)
-                </span>
-              </div>
+              <button
+                onClick={() => handleTabSelect('userbots')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors shrink-0 text-xs"
+              >
+                ربط يوزربوت القناة
+              </button>
             </div>
           )}
 
@@ -763,11 +719,11 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
               <button
                 onClick={handleSendAllPendingNow}
                 disabled={bulkSending}
-                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-950/40 text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap active:scale-95 disabled:opacity-50"
-                title="إرسال رسائل الاسترداد فوراً بدون أي تأخير لجميع الحالات المعلقة وغير المتواصل معهم"
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
+                title="بدء إرسال رسائل الاسترداد للحالات المعلقة في الطابور"
               >
-                <Zap className={`w-3.5 h-3.5 ${bulkSending ? 'animate-bounce text-amber-300' : 'text-amber-300'}`} />
-                <span>{bulkSending ? 'جاري الإرسال الفوري...' : 'إرسال فوري للجميع (بدون انتظار) ⚡'}</span>
+                <Send className="w-3.5 h-3.5" />
+                <span>{bulkSending ? 'جاري الإرسال...' : 'إرسال الحالات المعلقة'}</span>
               </button>
 
               <button
@@ -823,9 +779,9 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                                 {c.user_username && (
                                   <span className="block text-[10px] text-slate-400 font-mono font-normal">@{c.user_username}</span>
                                 )}
-                                {c.queue_delay_reason && c.status === 'SCHEDULED' && (
-                                  <span className="block text-[10px] text-amber-400 font-medium mt-0.5 leading-tight" title={c.queue_delay_reason}>
-                                    ⏱️ {c.queue_delay_reason}
+                                {c.status === 'SCHEDULED' && (
+                                  <span className="block text-[10px] text-slate-500 font-medium mt-0.5">
+                                    في طابور الإرسال
                                   </span>
                                 )}
                               </div>
@@ -855,34 +811,25 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                           </td>
                           <td className="p-3.5 text-center">
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                              {/* 1-Click Instant Telegram Direct Link */}
+                              {/* Telegram Direct Link */}
                               {c.direct_telegram_link ? (
                                 <a
                                   href={c.direct_telegram_link}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-sky-500/20 to-blue-500/20 hover:from-sky-500/30 hover:to-blue-500/30 text-sky-300 text-xs font-black border border-sky-500/40 transition-all inline-flex items-center gap-1 shadow-sm active:scale-95"
-                                  title="فتح محادثة تيليجرام مع رسالة الاسترداد معبأة وجاهزة للإرسال فوراً بضغطة زر"
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold border border-emerald-500/20 transition-colors inline-flex items-center gap-1.5"
+                                  title="فتح المحادثة في تيليجرام"
                                 >
-                                  <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
-                                  <span>مراسلة فورية ⚡</span>
-                                </a>
-                              ) : c.user_username ? (
-                                <a
-                                  href={`https://t.me/${c.user_username}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold border border-sky-500/20 transition-all inline-flex items-center gap-1"
-                                  title="فتح المحادثة في تطبيق تيليجرام"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                  <span>تيليجرام</span>
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>مراسلة مباشرة</span>
                                 </a>
                               ) : (
                                 <a
-                                  href={`tg://user?id=${c.telegram_user_id}`}
-                                  className="px-2.5 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold border border-sky-500/20 transition-all inline-flex items-center gap-1"
-                                  title="فتح المحادثة في تطبيق تيليجرام"
+                                  href={c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors inline-flex items-center gap-1.5"
+                                  title="فتح المحادثة في تيليجرام"
                                 >
                                   <ExternalLink className="w-3.5 h-3.5" />
                                   <span>تيليجرام</span>
@@ -891,7 +838,8 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
                               <button
                                 onClick={() => openCaseChat(c)}
-                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold transition-all inline-flex items-center gap-1.5"
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
+                                title="سجل المحادثة"
                               >
                                 <MessageSquare className="w-3.5 h-3.5" />
                                 <span>المحادثة</span>
@@ -900,11 +848,11 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                                 <button
                                   onClick={() => handleSendCaseNow(c.id)}
                                   disabled={sendingCaseId === c.id}
-                                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/30 hover:to-teal-600/30 text-emerald-300 text-xs font-bold border border-emerald-500/40 transition-all inline-flex items-center gap-1 shadow-sm disabled:opacity-50 active:scale-95"
-                                  title="إرسال رسالة الاسترداد فوراً لهذا العضو دون انتظار"
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1 disabled:opacity-50"
+                                  title="إرسال الآن عبر اليوزربوت"
                                 >
-                                  <Zap className={`w-3 h-3 ${sendingCaseId === c.id ? 'animate-spin text-amber-300' : 'text-amber-400'}`} />
-                                  <span>{sendingCaseId === c.id ? 'جاري...' : 'إرسال فوراً ⚡'}</span>
+                                  <Send className="w-3 h-3" />
+                                  <span>{sendingCaseId === c.id ? 'إرسال...' : 'إرسال الآن'}</span>
                                 </button>
                               )}
                               {c.status === 'UNCONTACTABLE' && (
@@ -932,74 +880,48 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
       {/* ── TAB 2: FEEDBACK & CHURN ANALYTICS ──────────────────────────────── */}
       {activeTab === 'analytics' && (
-        <div className="space-y-6">
-          {/* Executive Sub-Header Strip */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-emerald-400" />
-                <span>تحليلات قمع الاسترداد وسلوك المغادرين</span>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  بيانات حقيقية 100%
+        <div className="space-y-4">
+          {/* Section 1: Conversion Funnel */}
+          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Target className="w-4 h-4 text-emerald-400" />
+                  <span>مسار الاسترداد والتحويل</span>
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                  معدل الرد: <strong className="text-white font-mono">{summary?.response_rate_percent || 0}%</strong>
                 </span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                تتبع مراحل الاسترداد خطوة بخطوة، مع كشف ساعات ذروة المغادرة، ونسب تفاعل الأعضاء الحقيقية.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                <span className="block text-[10px] text-slate-400">معدل التفاعل والرد</span>
-                <span className="text-xs font-bold font-mono text-amber-400">{summary?.response_rate_percent || 0}%</span>
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                  العودة بعد الرد: <strong className="text-emerald-400 font-mono">{summary?.conversion_on_response_percent || 0}%</strong>
+                </span>
               </div>
-              <div className="px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                <span className="block text-[10px] text-slate-400">نسبة العودة بعد الرد</span>
-                <span className="text-xs font-bold font-mono text-emerald-400">{summary?.conversion_on_response_percent || 0}%</span>
-              </div>
-              <div className="px-3 py-1.5 rounded-xl bg-slate-950/80 border border-slate-800 text-center">
-                <span className="block text-[10px] text-slate-400">زمن الرصد اللحظي</span>
-                <span className="text-xs font-bold font-mono text-blue-400">&lt; 3 ثوانٍ ⚡</span>
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 1: Full 5-Stage Conversion Funnel */}
-          <div className="p-5 sm:p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Target className="w-4 h-4 text-emerald-400" />
-                <span>قمع الاسترداد والتحويل (Full 5-Stage Retention Funnel)</span>
-              </h3>
-              <span className="text-xs text-slate-400">
-                من إجمالي <strong className="text-white font-mono">{summary?.total_left_detected || 0}</strong> عضو مغادر
-              </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               {(summary?.funnel_stages || []).map((stage, idx) => (
                 <div 
                   key={stage.id || idx}
-                  className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col justify-between relative overflow-hidden group hover:border-slate-700 transition-all"
+                  className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col justify-between"
                 >
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                        مرحلة {idx + 1}
-                      </span>
-                      <span className="text-xs font-bold font-mono text-emerald-400">
-                        {stage.percentage}%
-                      </span>
-                    </div>
-                    <span className="text-xs font-bold text-slate-200 block pt-1">{stage.name}</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-medium text-slate-400">
+                      مرحلة {idx + 1}
+                    </span>
+                    <span className="text-xs font-semibold font-mono text-emerald-400">
+                      {stage.percentage}%
+                    </span>
+                  </div>
+                  <span className="text-xs font-medium text-slate-200 block pt-1.5">{stage.name}</span>
+
+                  <div className="pt-3 flex items-baseline justify-between">
+                    <span className="text-2xl font-bold font-mono text-white">{stage.count}</span>
+                    <span className="text-[10px] text-slate-500">عضو</span>
                   </div>
 
-                  <div className="pt-4 flex items-baseline justify-between">
-                    <span className="text-2xl font-black font-mono text-white">{stage.count}</span>
-                    <span className="text-[11px] text-slate-400">عضو</span>
-                  </div>
-
-                  <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden mt-3">
+                  <div className="w-full bg-slate-800/80 h-1 rounded-full overflow-hidden mt-2.5">
                     <div 
                       className={`h-full rounded-full transition-all ${
                         idx === 4 ? 'bg-emerald-500' : idx === 3 ? 'bg-teal-500' : idx === 2 ? 'bg-amber-500' : idx === 1 ? 'bg-blue-500' : 'bg-indigo-500'
@@ -1012,128 +934,20 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             </div>
           </div>
 
-          {/* SECTION 2: 100% Status Distribution */}
-          <div className="p-5 sm:p-6 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <PieChart className="w-4 h-4 text-blue-400" />
-                <span>توزيع الحالات الشامل للأعضاء المغادرين (حسابات موثقة 100%)</span>
-              </h3>
-              <span className="text-xs text-slate-400">
-                إجمالي مسجل: <strong className="text-white font-mono">{summary?.total_left_detected || 0}</strong> عضو
-              </span>
-            </div>
-
-            {/* Stacked Progress Bar */}
-            <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-800/60 p-0.5 border border-slate-700/50">
-              {(summary?.status_distribution || []).map((s, idx) => {
-                const colorMap = {
-                  emerald: 'bg-emerald-500',
-                  blue: 'bg-blue-500',
-                  teal: 'bg-teal-500',
-                  sky: 'bg-sky-500',
-                  amber: 'bg-amber-500',
-                  rose: 'bg-rose-500',
-                  slate: 'bg-slate-500'
-                };
-                return (
-                  <div 
-                    key={idx}
-                    title={`${s.label}: ${s.count} عضو (${s.percentage}%)`}
-                    className={`${colorMap[s.color] || 'bg-slate-500'} h-full transition-all first:rounded-r-full last:rounded-l-full`}
-                    style={{ width: `${Math.max(2, s.percentage)}%` }}
-                  />
-                );
-              })}
-            </div>
-
-            {/* Status Legend Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 pt-1">
-              {(summary?.status_distribution || []).map((s, idx) => (
-                <div key={idx} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/70 flex items-center justify-between">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${
-                      s.color === 'emerald' ? 'bg-emerald-500' :
-                      s.color === 'blue' ? 'bg-blue-500' :
-                      s.color === 'teal' ? 'bg-teal-500' :
-                      s.color === 'sky' ? 'bg-sky-500' :
-                      s.color === 'amber' ? 'bg-amber-500' :
-                      s.color === 'rose' ? 'bg-rose-500' : 'bg-slate-500'
-                    }`} />
-                    <span className="text-xs text-slate-300 truncate">{s.label}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0 font-mono text-xs">
-                    <span className="font-bold text-white">{s.count}</span>
-                    <span className="text-[10px] text-slate-400">({s.percentage}%)</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SECTION 3: Churn Reasons & Feedback vs Peak Churn Hours */}
+          {/* Section 2: Grid 2 Columns: Peak Hours & Status Breakdown */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Right: Churn Reasons Breakdown */}
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-emerald-400" />
-                  <span>تصنيف أسباب وملاحظات المغادرة</span>
-                </h3>
-                <span className="text-[11px] text-slate-400">معدل الاسترداد لكل فئة</span>
-              </div>
-
-              {summary?.reasons_breakdown?.length === 0 ? (
-                <div className="p-8 text-center text-slate-500 text-xs italic">
-                  لم يتم تسجيل إجابات من الأعضاء بعد.
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {summary?.reasons_breakdown?.map((r, i) => (
-                    <div key={i} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-slate-200">{getReasonLabel(r.category)}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-400 font-mono">{r.count} عضو</span>
-                          <span className={`px-2 py-0.5 rounded font-bold font-mono text-[10px] ${
-                            r.rate > 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-800 text-slate-400'
-                          }`}>
-                            {r.rate}% استرداد
-                          </span>
-                        </div>
-                      </div>
-                      <div className="w-full bg-slate-800/80 h-1.5 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-emerald-500 h-full rounded-full transition-all"
-                          style={{ width: `${Math.min(100, r.rate)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Actionable Tip Box */}
-              <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/20 text-xs text-emerald-300 flex items-start gap-2.5">
-                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>
-                  <strong>رؤية استراتيجية:</strong> أظهرت البيانات أن تفاعل الأعضاء بالرد على رسالة الاسترداد يرفع نسبة العودة للقناة إلى <strong>{summary?.conversion_on_response_percent || 100}%</strong>! ننصح بمتابعة المحادثات النشطة وسرعة تقديم المساعدة.
-                </span>
-              </div>
-            </div>
-
-            {/* Left: 24-Hour Peak Churn Distribution */}
-            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+            {/* Right: Peak Departure Hours */}
+            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Clock className="w-4 h-4 text-amber-400" />
-                  <span>أوقات ذروة مغادرة الأعضاء على مدار اليوم (24 ساعة)</span>
+                  <span>أوقات ذروة المغادرة (24 ساعة)</span>
                 </h3>
-                <span className="text-[11px] text-amber-400/90 font-mono">توقيت محلي</span>
+                <span className="text-[11px] text-slate-500">توقيت محلي</span>
               </div>
 
               <div className="space-y-3">
-                <div className="h-40 flex items-end gap-1.5 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 overflow-x-auto">
+                <div className="h-40 flex items-end gap-1 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 overflow-x-auto">
                   {(() => {
                     const hourly = summary?.hourly_distribution || [];
                     const counts = hourly.map(h => h.count);
@@ -1142,15 +956,14 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                       const isPeak = h.count > 0 && h.count === maxVal;
                       const heightPercent = Math.max(8, (h.count / maxVal) * 100);
                       return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-[14px] h-full justify-end group relative">
-                          {/* Tooltip */}
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-[12px] h-full justify-end group relative">
                           <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-10 font-mono">
                             {h.hour_label}: {h.count} عضو
                           </div>
                           <div 
                             className={`w-full rounded-t transition-all ${
-                              isPeak ? 'bg-amber-400 shadow-lg shadow-amber-500/20' :
-                              h.count > 0 ? 'bg-indigo-500 hover:bg-indigo-400' : 'bg-slate-800/40'
+                              isPeak ? 'bg-amber-400' :
+                              h.count > 0 ? 'bg-indigo-500' : 'bg-slate-800/40'
                             }`}
                             style={{ height: `${heightPercent}%` }}
                           />
@@ -1162,30 +975,89 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                     });
                   })()}
                 </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded bg-amber-400" />
-                    <span>ساعة الذروة الأعلى</span>
-                    <span className="w-2.5 h-2.5 rounded bg-indigo-500 ml-2" />
+                    <span className="w-2 h-2 rounded bg-amber-400" />
+                    <span>ساعة الذروة</span>
+                    <span className="w-2 h-2 rounded bg-indigo-500 ml-2" />
                     <span>خروج نشط</span>
                   </div>
-                  <span>المحور الأفقي: ساعات اليوم (00:00 - 23:00)</span>
+                  <span>مدار 24 ساعة (00:00 - 23:00)</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Left: Status Distribution */}
+            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <PieChart className="w-4 h-4 text-blue-400" />
+                  <span>توزيع حالات المغادرين</span>
+                </h3>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {summary?.total_left_detected || 0} عضو
+                </span>
+              </div>
+
+              {/* Stacked Progress Bar */}
+              <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-800/60 border border-slate-700/50">
+                {(summary?.status_distribution || []).map((s, idx) => {
+                  const colorMap = {
+                    emerald: 'bg-emerald-500',
+                    blue: 'bg-blue-500',
+                    teal: 'bg-teal-500',
+                    sky: 'bg-sky-500',
+                    amber: 'bg-amber-500',
+                    rose: 'bg-rose-500',
+                    slate: 'bg-slate-500'
+                  };
+                  return (
+                    <div 
+                      key={idx}
+                      title={`${s.label}: ${s.count} عضو (${s.percentage}%)`}
+                      className={`${colorMap[s.color] || 'bg-slate-500'} h-full transition-all`}
+                      style={{ width: `${Math.max(2, s.percentage)}%` }}
+                    />
+                  );
+                })}
+              </div>
+
+              {/* Status List */}
+              <div className="space-y-2 pt-1">
+                {(summary?.status_distribution || []).map((s, idx) => (
+                  <div key={idx} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/70 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${
+                        s.color === 'emerald' ? 'bg-emerald-500' :
+                        s.color === 'blue' ? 'bg-blue-500' :
+                        s.color === 'teal' ? 'bg-teal-500' :
+                        s.color === 'sky' ? 'bg-sky-500' :
+                        s.color === 'amber' ? 'bg-amber-400' :
+                        s.color === 'rose' ? 'bg-rose-500' : 'bg-slate-500'
+                      }`} />
+                      <span className="text-xs text-slate-300">{s.label}</span>
+                    </div>
+                    <div className="flex items-center gap-2 font-mono text-xs">
+                      <span className="font-bold text-white">{s.count}</span>
+                      <span className="text-[11px] text-slate-500">({s.percentage}%)</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* SECTION 4: Daily Churn vs Rejoins Trend Comparison */}
-          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+          {/* Section 3: Daily Churn vs Rejoins Trend Comparison */}
+          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <RefreshCw className="w-4 h-4 text-blue-400" />
-                <span>مقارنة المغادرة اليومية مقابل العودة (آخر 7 أيام)</span>
+                <span>حركة المغادرة والعودة (آخر 7 أيام)</span>
               </h3>
-              <span className="text-xs text-slate-400">صافي الأثر ومعدل التعافي</span>
+              <span className="text-[11px] text-slate-500">الصافي اليومي</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
               {summary?.daily_trend?.map((d, idx) => {
                 const net = d.rejoins - d.leaves;
                 return (
@@ -1193,18 +1065,18 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                     <span className="text-[11px] font-mono text-slate-400 block text-center border-b border-slate-800/60 pb-1">
                       {d.date.slice(5)}
                     </span>
-                    <div className="space-y-1.5 text-xs font-mono">
+                    <div className="space-y-1 text-xs font-mono">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 text-[10px]">مغادر:</span>
+                        <span className="text-slate-500 text-[10px]">مغادر:</span>
                         <span className="text-rose-400 font-bold">-{d.leaves}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 text-[10px]">استرداد:</span>
+                        <span className="text-slate-500 text-[10px]">استرداد:</span>
                         <span className="text-emerald-400 font-bold">+{d.rejoins}</span>
                       </div>
                     </div>
                     <div className="pt-1 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                      <span className="text-slate-400">الصافي:</span>
+                      <span className="text-slate-500">الصافي:</span>
                       <span className={`font-bold font-mono ${net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
                         {net > 0 ? `+${net}` : net}
                       </span>

@@ -51,13 +51,8 @@ export default function WinbackSidebar({ activeTab, onSelectTab }) {
             <UserCheck className="w-6 h-6 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-base font-black text-white tracking-tight">TeleWinBack</span>
-              <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/10 text-emerald-400 text-[9px] font-extrabold border border-emerald-500/30">
-                PRO
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400 font-medium">استعادة ومتابعة الأعضاء 24/7</p>
+            <span className="text-base font-bold text-white tracking-tight">استرداد الأعضاء</span>
+            <p className="text-[11px] text-slate-500 font-medium">إدارة القنوات والمغادرين</p>
           </div>
         </div>
       </div>

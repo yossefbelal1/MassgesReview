@@ -307,11 +307,11 @@ def get_recovery_cases(
         queue_reason = None
         if c.status in ["SCHEDULED", "DETECTED"]:
             if c.channel_id in dedicated_set:
-                queue_reason = "مجدول للإرسال التلقائي عبر يوزربوت القناة المخصص"
+                queue_reason = "مجدول عبر يوزربوت القناة"
             else:
-                queue_reason = "في طابور الإرسال (يعمل عبر حساب المنصة المشترك - يوصى بربط يوزربوت القناة)"
+                queue_reason = "في طابور الإرسال"
         elif c.status == "UNCONTACTABLE":
-            queue_reason = "حساب المستخدم مقيد الخصوصية أو محذوف"
+            queue_reason = "حساب مقيد الخصوصية أو محذوف"
 
         item = RecoveryCaseOut(
             id=c.id,
@@ -399,11 +399,11 @@ def get_case_detail(
             ChannelUserbot.is_active == True
         ).first()
         if not has_dedicated:
-            queue_reason = "في طابور الإرسال (يعمل عبر حساب المنصة المشترك - يوصى بربط يوزربوت القناة)"
+            queue_reason = "في طابور الإرسال"
         else:
-            queue_reason = "مجدول للإرسال التلقائي عبر يوزربوت القناة المخصص"
+            queue_reason = "مجدول عبر يوزربوت القناة"
     elif case.status == "UNCONTACTABLE":
-        queue_reason = "حساب المستخدم مقيد الخصوصية أو محذوف"
+        queue_reason = "حساب مقيد الخصوصية أو محذوف"
 
     return RecoveryCaseDetailOut(
         id=case.id,

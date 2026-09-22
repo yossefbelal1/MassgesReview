@@ -28,18 +28,9 @@ export default function WinbackNavbar({ onOpenDrawer, onRefresh, refreshing }) {
             <UserCheck className="w-5 h-5 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-black text-white tracking-tight">
-                منصة استعادة ومتابعة الأعضاء
-              </h1>
-              <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold">
-                <Sparkles className="w-2.5 h-2.5" />
-                TeleWinBack AI
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400 hidden sm:block">
-              رصد مغادرة الأعضاء، تواصل فوري عبر اليوزربوت، وتحليلات أسباب الخروج
-            </p>
+            <h1 className="text-sm sm:text-base font-bold text-white tracking-tight">
+              استرداد ومتابعة الأعضاء
+            </h1>
           </div>
         </div>
       </div>
