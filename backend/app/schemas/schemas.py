@@ -323,6 +323,11 @@ class RetentionSummaryOut(BaseModel):
     reasons_breakdown: List[dict] = []
     daily_trend: List[dict] = []
     funnel_reconciled: bool = True
+    funnel_stages: List[dict] = []
+    status_distribution: List[dict] = []
+    hourly_distribution: List[dict] = []
+    response_rate_percent: float = 0.0
+    conversion_on_response_percent: float = 0.0
 
 # Dedicated Channel Userbot Schemas
 class UserbotSendCodeRequest(BaseModel):

@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, or_
+from sqlalchemy import func, desc, or_, extract
 
 from backend.app.core.database import get_db
 from backend.app.api.deps import get_current_user, get_current_tenant_id
@@ -46,7 +46,25 @@ def get_retention_summary(
     total_scheduled = base_query.filter(RecoveryCase.status.in_(["SCHEDULED", "DETECTED"])).count()
     total_opt_out = base_query.filter(RecoveryCase.status == "OPT_OUT").count()
 
+    # Members who responded to the outreach message
+    total_responded = base_query.filter(
+        or_(
+            RecoveryCase.last_response_at.isnot(None),
+            RecoveryCase.status.in_(["CONVERSATION_ACTIVE", "LINK_DELIVERED", "RECOVERED"])
+        )
+    ).count()
+
+    # Members who received an invite link
+    total_link_delivered = base_query.filter(
+        or_(
+            RecoveryCase.link_sent_at.isnot(None),
+            RecoveryCase.status.in_(["LINK_DELIVERED", "RECOVERED"])
+        )
+    ).count()
+
     win_back_rate = round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0
+    response_rate = round((total_responded / total_contacted * 100), 1) if total_contacted > 0 else 0.0
+    conversion_on_response = round((total_rejoined / total_responded * 100), 1) if total_responded > 0 else 0.0
 
     # Average time to rejoin in hours
     avg_rejoin_sec = db.query(func.avg(RecoveryCase.time_to_rejoin_seconds)).filter(
@@ -56,33 +74,142 @@ def get_retention_summary(
     ).scalar()
     avg_rejoin_hours = round((avg_rejoin_sec / 3600), 1) if avg_rejoin_sec else 0.0
 
-    # Churn reasons breakdown
-    reasons_query = db.query(
-        RecoveryCase.leave_reason_category,
-        func.count(RecoveryCase.id).label("count")
-    ).filter(
-        RecoveryCase.tenant_id == tenant_id,
-        RecoveryCase.leave_reason_category.isnot(None)
-    )
-    if channel_id:
-        reasons_query = reasons_query.filter(RecoveryCase.channel_id == channel_id)
-    reasons_rows = reasons_query.group_by(RecoveryCase.leave_reason_category).all()
+    # 1. Full 5-Stage Retention Funnel
+    funnel_stages = [
+        {
+            "id": "detected",
+            "name": "تم رصد المغادرة",
+            "count": total_left,
+            "percentage": 100.0,
+            "color": "indigo"
+        },
+        {
+            "id": "contacted",
+            "name": "تم إطلاق التواصل الآلي",
+            "count": total_contacted,
+            "percentage": round((total_contacted / total_left * 100), 1) if total_left > 0 else 0.0,
+            "color": "blue"
+        },
+        {
+            "id": "responded",
+            "name": "تفاعل وردود الأعضاء",
+            "count": total_responded,
+            "percentage": round((total_responded / total_left * 100), 1) if total_left > 0 else 0.0,
+            "color": "amber"
+        },
+        {
+            "id": "link_delivered",
+            "name": "تم تسليم رابط العودة",
+            "count": total_link_delivered,
+            "percentage": round((total_link_delivered / total_left * 100), 1) if total_left > 0 else 0.0,
+            "color": "teal"
+        },
+        {
+            "id": "rejoined",
+            "name": "عادوا للقناة بنجاح 🎯",
+            "count": total_rejoined,
+            "percentage": round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0,
+            "color": "emerald"
+        }
+    ]
+
+    # 2. Status Distribution (Accounts for 100% of the members)
+    status_counts = {}
+    for row in base_query.with_entities(RecoveryCase.status, func.count(RecoveryCase.id)).group_by(RecoveryCase.status).all():
+        status_counts[row[0]] = row[1]
+
+    status_labels = [
+        {"status": "RECOVERED", "label": "عادوا للقناة (نجاح الاسترداد) 🟢", "color": "emerald"},
+        {"status": "CONVERSATION_ACTIVE", "label": "محادثة جارية وتفاعل 💬", "color": "blue"},
+        {"status": "LINK_DELIVERED", "label": "تم تسليم رابط العودة 🔗", "color": "teal"},
+        {"status": "CONTACTED", "label": "تم التواصل وفي انتظار الرد 📩", "color": "sky"},
+        {"status": "SCHEDULED", "label": "في طابور الإرسال المجدول ⏱️", "color": "amber"},
+        {"status": "DETECTED", "label": "تم الرصد (بانتظار الجدولة) 🔍", "color": "slate"},
+        {"status": "UNCONTACTABLE", "label": "حماية خصوصية تيليجرام 🛡️", "color": "rose"},
+        {"status": "OPT_OUT", "label": "رفض الاستمرار ⛔", "color": "slate"},
+    ]
+    status_distribution = []
+    for sl in status_labels:
+        cnt = status_counts.get(sl["status"], 0)
+        if cnt > 0:
+            status_distribution.append({
+                "status": sl["status"],
+                "label": sl["label"],
+                "count": cnt,
+                "percentage": round((cnt / total_left * 100), 1) if total_left > 0 else 0.0,
+                "color": sl["color"]
+            })
+
+    # 3. Churn reasons breakdown (Includes explicit categories + awaiting response + queued)
+    explicit_reasons = base_query.filter(RecoveryCase.leave_reason_category.isnot(None)).with_entities(
+        RecoveryCase.leave_reason_category, func.count(RecoveryCase.id)
+    ).group_by(RecoveryCase.leave_reason_category).all()
 
     reasons_breakdown = []
-    for r in reasons_rows:
-        cat = r.leave_reason_category or "OTHER"
+    for cat, cnt in explicit_reasons:
         rejoined_in_cat = base_query.filter(
             RecoveryCase.leave_reason_category == cat,
             RecoveryCase.status == "RECOVERED"
         ).count()
         reasons_breakdown.append({
-            "category": cat,
-            "count": r.count,
+            "category": cat or "OTHER",
+            "count": cnt,
             "rejoined": rejoined_in_cat,
-            "rate": round((rejoined_in_cat / r.count * 100), 1) if r.count > 0 else 0.0
+            "rate": round((rejoined_in_cat / cnt * 100), 1) if cnt > 0 else 0.0
         })
 
-    # Daily trend for the last 7 days
+    contacted_no_reason = base_query.filter(
+        RecoveryCase.leave_reason_category.is_(None),
+        RecoveryCase.status.in_(["CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"])
+    ).count()
+    if contacted_no_reason > 0:
+        reasons_breakdown.append({
+            "category": "AWAITING_REPLY",
+            "count": contacted_no_reason,
+            "rejoined": 0,
+            "rate": 0.0
+        })
+
+    scheduled_no_reason = base_query.filter(
+        RecoveryCase.leave_reason_category.is_(None),
+        RecoveryCase.status.in_(["SCHEDULED", "DETECTED"])
+    ).count()
+    if scheduled_no_reason > 0:
+        reasons_breakdown.append({
+            "category": "IN_QUEUE",
+            "count": scheduled_no_reason,
+            "rejoined": 0,
+            "rate": 0.0
+        })
+
+    uncontactable_no_reason = base_query.filter(
+        RecoveryCase.leave_reason_category.is_(None),
+        RecoveryCase.status == "UNCONTACTABLE"
+    ).count()
+    if uncontactable_no_reason > 0:
+        reasons_breakdown.append({
+            "category": "PRIVACY_BLOCKED",
+            "count": uncontactable_no_reason,
+            "rejoined": 0,
+            "rate": 0.0
+        })
+
+    # 4. Hourly departure peak analysis (00:00 to 23:00)
+    hourly_query = base_query.with_entities(
+        extract('hour', RecoveryCase.created_at).label("hour"),
+        func.count(RecoveryCase.id).label("count")
+    ).group_by("hour").order_by("hour").all()
+
+    hourly_map = {int(h): c for h, c in hourly_query if h is not None}
+    hourly_distribution = []
+    for h in range(24):
+        hourly_distribution.append({
+            "hour": h,
+            "hour_label": f"{h:02d}:00",
+            "count": hourly_map.get(h, 0)
+        })
+
+    # 5. Daily trend for the last 7 days
     daily_trend = []
     now = datetime.now(timezone.utc)
     for i in range(6, -1, -1):
@@ -120,7 +247,12 @@ def get_retention_summary(
         "average_rejoin_hours": avg_rejoin_hours,
         "reasons_breakdown": reasons_breakdown,
         "daily_trend": daily_trend,
-        "funnel_reconciled": True
+        "funnel_reconciled": True,
+        "funnel_stages": funnel_stages,
+        "status_distribution": status_distribution,
+        "hourly_distribution": hourly_distribution,
+        "response_rate_percent": response_rate,
+        "conversion_on_response_percent": conversion_on_response
     }
 
 
@@ -430,16 +562,18 @@ async def send_case_now_direct(
     }
 
 
+@router.post("/cases/turbo-dispatch")
 @router.post("/cases/reset-all")
-async def reset_all_uncontactable_cases(
+async def turbo_dispatch_pending_cases(
     channel_id: Optional[str] = None,
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Immediately resets and dispatches all uncontacted, pending, or failed cases.
-    Targets SCHEDULED, DETECTED, UNCONTACTABLE, and NO_RESPONSE cases without any delay.
+    Intelligently staggers and activates instant safe outreach for all pending cases.
+    Applies human pacing (25s interval per case) to prevent Telegram PeerFlood blocks,
+    and immediately wakes up the dispatcher for the first case.
     """
     query = db.query(RecoveryCase).filter(
         RecoveryCase.tenant_id == tenant_id,
@@ -448,25 +582,28 @@ async def reset_all_uncontactable_cases(
     if channel_id:
         query = query.filter(RecoveryCase.channel_id == channel_id)
 
-    cases = query.all()
+    cases = query.order_by(RecoveryCase.created_at.desc()).all()
     now = datetime.now(timezone.utc)
-    for c in cases:
+    for idx, c in enumerate(cases):
         c.status = "SCHEDULED"
         c.contactable = True
         c.uncontactable_reason = None
-        c.scheduled_contact_at = now  # Send NOW without delay!
+        # Natural human pacing: stagger each message by 25s (case 0 is now, case 1 is now+25s...)
+        c.scheduled_contact_at = now + timedelta(seconds=idx * 25)
 
     db.commit()
 
-    # Trigger background worker dispatch immediately
+    # Trigger background worker dispatch immediately for due cases
     try:
         asyncio.create_task(retention_engine.process_pending_recovery_contacts(db))
     except Exception as e:
         logger.warning(f"Error triggering batch dispatch: {e}")
 
     return {
+        "success": True,
         "reset_count": len(cases),
-        "message": f"تم إطلاق الإرسال الفوري لـ {len(cases)} عضواً بنجاح ⚡"
+        "dispatched_count": len(cases),
+        "message": f"تم تفعيل الإرسال التوربو الذكي لـ {len(cases)} عضواً بفواصل آمنة (عضو كل 25 ثانية) لحماية الحساب من أي تقييد ⚡"
     }
 
 

@@ -1,4 +1,5 @@
 import re
+import random
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
@@ -542,14 +543,14 @@ class RetentionEngine:
 
     async def process_pending_recovery_contacts(self, db: Session):
         """
-        Executes scheduled initial recovery contacts immediately.
-        Processes batches of up to 20 cases with minimal fast pacing.
+        Executes scheduled initial recovery contacts with safe natural pacing.
+        Processes batches of due cases with intelligent inter-message delays.
         """
         now = datetime.now(timezone.utc)
         pending_cases = db.query(RecoveryCase).filter(
             RecoveryCase.status == "SCHEDULED",
             RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.created_at.desc()).limit(20).all()
+        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(5).all()
 
         if not pending_cases:
             return
@@ -557,8 +558,10 @@ class RetentionEngine:
         for case in pending_cases:
             res = await self.send_recovery_to_case(db, case)
             if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "PEER_FLOOD", "CLIENT_DISCONNECTED"]:
-                logger.info(f"[⚠️ Outreach Delayed]: Case {case.id} for channel {case.channel_id} delayed ({res.get('error')}). Continuing batch.")
-                continue
+                logger.info(f"[⚠️ Outreach Paused]: Session cooldown active ({res.get('error')}). Halting current batch.")
+                break
+            # Natural anti-spam pacing between multiple sends in the same batch
+            await asyncio.sleep(random.uniform(4.0, 7.0))
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """
