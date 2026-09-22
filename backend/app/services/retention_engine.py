@@ -530,10 +530,9 @@ class RetentionEngine:
 
         for case in pending_cases:
             res = await self.send_recovery_to_case(db, case)
-            # If all sessions are busy or in cooldown, pause remaining batch until next cycle
             if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "PEER_FLOOD", "CLIENT_DISCONNECTED"]:
-                logger.info("[⏸️ Batch Paused]: Outbound sessions cooling down or busy. Pausing batch.")
-                break
+                logger.info(f"[⚠️ Outreach Delayed]: Case {case.id} for channel {case.channel_id} delayed ({res.get('error')}). Continuing batch.")
+                continue
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

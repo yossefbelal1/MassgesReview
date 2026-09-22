@@ -591,14 +591,39 @@ async def verify_userbot_login_code(
 ):
     """
     Step 2: Verifies code (and optional 2FA password) and establishes persistent StringSession.
+    Immediately resets and releases all pending scheduled cases for this channel.
     """
-    return await dedicated_userbot_service.verify_login_code(
+    result = await dedicated_userbot_service.verify_login_code(
         db=db,
         tenant_id=tenant_id,
         login_attempt_id=payload.login_attempt_id,
         code=payload.code,
         password=payload.password
     )
+
+    if isinstance(result, dict) and result.get("success") and not result.get("needs_2fa") and result.get("userbot"):
+        try:
+            channel_id = result["userbot"].get("channel_id") if isinstance(result["userbot"], dict) else getattr(result["userbot"], "channel_id", None)
+            if channel_id:
+                now = datetime.now(timezone.utc)
+                # Reset all scheduled cases for this channel to send immediately!
+                db.query(RecoveryCase).filter(
+                    RecoveryCase.channel_id == channel_id,
+                    RecoveryCase.status.in_(["SCHEDULED", "DETECTED", "UNCONTACTABLE"])
+                ).update({
+                    "scheduled_contact_at": now,
+                    "status": "SCHEDULED",
+                    "contactable": True,
+                    "uncontactable_reason": None
+                })
+                db.commit()
+                logger.info(f"[🚀 Dedicated Bot Connected]: Reset all pending recovery cases for channel {channel_id} to NOW.")
+                # Trigger immediate background dispatch
+                asyncio.create_task(retention_engine.process_pending_recovery_contacts(db))
+        except Exception as e:
+            logger.warning(f"Error resetting cases upon userbot connect: {e}")
+
+    return result
 
 
 @router.get("/userbot/{channel_id}", response_model=Optional[ChannelUserbotOut])

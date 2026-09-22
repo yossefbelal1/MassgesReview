@@ -446,7 +446,11 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       setBulkSending(true);
       const chParam = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
       const res = await apiClient.post(`/retention/cases/reset-all${chParam}`);
-      showToast(res.data?.message || 'تم إطلاق الإرسال الفوري لجميع الحالات بنجاح ⚡', 'success');
+      if (!dedicatedUserbot) {
+        showToast('تمت إعادة جدولة الحالات فوراً ⚡ تنبيه: حساب المنصة المشترك مقيد حالياً من تيليجرام. اربط رقم هاتفك في تاب [حالة اليوزربوت] لتخطي القيود والإرسال فوراً للجميع!', 'error');
+      } else {
+        showToast(res.data?.message || 'تم إطلاق الإرسال الفوري لجميع الحالات بنجاح ⚡', 'success');
+      }
       await fetchData();
     } catch (err) {
       showToast('حدث خطأ أثناء الإرسال الفوري: ' + (err.response?.data?.detail || err.message), 'error');
@@ -665,6 +669,36 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       {/* ── TAB 1: LIVE RECOVERY CASES ────────────────────────────────────── */}
       {activeTab === 'cases' && (
         <div className="space-y-3">
+          {/* Dedicated Userbot Alert / Call to Action */}
+          {!dedicatedUserbot && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-slate-900 to-emerald-500/10 border-2 border-amber-500/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl animate-in fade-in">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0 mt-0.5 shadow-inner">
+                  <Zap className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>خطوة واحدة لتسريع الإرسال ورفع نسبة استرداد الأعضاء (Win-Back Rate) ⚡</span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">موصى به لقناتك</span>
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    حساب المنصة المشترك مقيد حالياً بحدود تيليجرام اليومية لمراسلة الغرباء. لإرسال الرسائل فوراً لجميع الأعضاء المغادرين بدون أي انتظار أو توقف وباسم وصورة قناتك:
+                    <strong className="text-emerald-400 font-bold mx-1">اربط رقم تيليجرام الخاص بقناتك في 30 ثانية</strong> (برقم هاتفك فقط)، أو راسلهم مباشرة الآن عبر زر <span className="text-sky-400 font-bold">[تيليجرام ↗]</span> في الجدول بالأسفل.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+                <button
+                  onClick={() => handleTabSelect('userbots')}
+                  className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-black transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 ring-2 ring-emerald-500/30 cursor-pointer"
+                >
+                  <Bot className="w-4 h-4" />
+                  <span>ربط رقم التيليجرام الآن 📲</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Filters Bar */}
           <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="relative flex-1">
