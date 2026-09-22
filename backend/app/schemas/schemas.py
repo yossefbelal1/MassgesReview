@@ -322,9 +322,9 @@ class RetentionSummaryOut(BaseModel):
 # Dedicated Channel Userbot Schemas
 class UserbotSendCodeRequest(BaseModel):
     channel_id: str
-    api_id: int
-    api_hash: str
     phone: str
+    api_id: Optional[int] = None
+    api_hash: Optional[str] = None
 
 class UserbotSendCodeResponse(BaseModel):
     success: bool

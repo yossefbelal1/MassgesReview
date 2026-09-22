@@ -62,17 +62,19 @@ class DedicatedUserbotService:
         if not channel:
             raise HTTPException(status_code=404, detail="القناة المحددة غير موجودة أو غير مصرح لك بإدارتها.")
 
-        # 2. Sanitize inputs
+        # 2. Sanitize inputs and fallback to platform credentials if omitted
         clean_phone = "".join(ch for ch in phone if ch.isdigit() or ch == "+").strip()
         if not clean_phone.startswith("+"):
             clean_phone = "+" + clean_phone
-        clean_api_hash = str(api_hash).strip()
+        
+        final_api_id = int(api_id) if (api_id and str(api_id).strip()) else int(settings.TELEGRAM_API_ID)
+        final_api_hash = str(api_hash).strip() if (api_hash and str(api_hash).strip()) else str(settings.TELEGRAM_API_HASH).strip()
 
         # 3. Request login code from Telegram MTProto
         temp_client = TelegramClient(
             StringSession(),
-            int(api_id),
-            clean_api_hash,
+            final_api_id,
+            final_api_hash,
             device_model="ReviewFlow SaaS",
             system_version="Linux / Cloud",
             app_version="2.0.0",
@@ -85,7 +87,7 @@ class DedicatedUserbotService:
             temp_session_str = temp_client.session.save()
             phone_code_hash = res.phone_code_hash
         except PhoneNumberInvalidError:
-            raise HTTPException(status_code=400, detail="رقم الهاتف غير صالح. يرجى التأكد من كتابة الرقم بصيغته الدولية الكاملة (مثال: +966501234567).")
+            raise HTTPException(status_code=400, detail="رقم الهاتف غير صالح. يرجى التأكد من كتابة الرقم بصيغته الدولية الكاملة (مثال: +966501234567 أو +201012345678).")
         except ApiIdInvalidError:
             raise HTTPException(status_code=400, detail="الـ API ID أو API HASH غير صحيح. يرجى التأكد من نسخهما بدقة من موقع my.telegram.org.")
         except FloodWaitError as fwe:
@@ -107,8 +109,8 @@ class DedicatedUserbotService:
         attempt = UserbotLoginAttempt(
             tenant_id=tenant_id,
             channel_id=channel_id,
-            api_id=int(api_id),
-            api_hash=clean_api_hash,
+            api_id=final_api_id,
+            api_hash=final_api_hash,
             phone=clean_phone,
             phone_code_hash=phone_code_hash,
             temp_session_str=temp_session_str,
@@ -394,6 +396,13 @@ class DedicatedUserbotService:
                     entity = await client.get_entity(int(target_user_id))
                 except Exception:
                     entity = int(target_user_id)
+
+            # Simulate natural human typing action to satisfy Telegram anti-spam heuristics
+            try:
+                async with client.action(entity, 'typing'):
+                    await asyncio.sleep(random.uniform(1.2, 2.2))
+            except Exception:
+                pass
 
             sent_msg = await client.send_message(entity, text)
             userbot.daily_contacts_count += 1

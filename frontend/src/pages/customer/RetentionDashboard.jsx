@@ -80,6 +80,7 @@ export default function RetentionDashboard({ onNavigate }) {
   // Dedicated Userbot State
   const [dedicatedUserbot, setDedicatedUserbot] = useState(null);
   const [userbotForm, setUserbotForm] = useState({ api_id: '', api_hash: '', phone: '' });
+  const [useCustomApi, setUseCustomApi] = useState(false);
   const [userbotStep, setUserbotStep] = useState(1); // 1 = enter credentials, 2 = verify OTP/2FA
   const [loginAttemptId, setLoginAttemptId] = useState('');
   const [verifyCode, setVerifyCode] = useState('');
@@ -87,7 +88,7 @@ export default function RetentionDashboard({ onNavigate }) {
   const [needs2fa, setNeeds2fa] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [showTelegramGuide, setShowTelegramGuide] = useState(true);
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
 
   // Settings Form State
   const [savingSettings, setSavingSettings] = useState(false);
@@ -182,19 +183,29 @@ export default function RetentionDashboard({ onNavigate }) {
       showToast('يرجى اختيار القناة أولاً لربط اليوزربوت بها.', 'error');
       return;
     }
-    if (!userbotForm.api_id || !userbotForm.api_hash || !userbotForm.phone) {
-      showToast('يرجى كتابة الـ API ID و API HASH ورقم الهاتف كاملاً بصيغته الدولية.', 'error');
+    if (!userbotForm.phone?.trim()) {
+      showToast('يرجى كتابة رقم الهاتف كاملاً بصيغته الدولية (مثال: +96650... أو +2010...).', 'error');
+      return;
+    }
+    if (useCustomApi && (!userbotForm.api_id || !userbotForm.api_hash)) {
+      showToast('يرجى كتابة الـ API ID و API HASH أو قم بإلغاء خيار الإعدادات المتقدمة لاستخدام المفاتيح الافتراضية.', 'error');
       return;
     }
 
     try {
       setSendingOtp(true);
-      const res = await apiClient.post('/retention/userbot/request-code', {
+      const payload = {
         channel_id: selectedChannelId,
-        api_id: parseInt(userbotForm.api_id),
-        api_hash: userbotForm.api_hash.trim(),
         phone: userbotForm.phone.trim()
-      });
+      };
+      if (useCustomApi && userbotForm.api_id) {
+        payload.api_id = parseInt(userbotForm.api_id);
+      }
+      if (useCustomApi && userbotForm.api_hash) {
+        payload.api_hash = userbotForm.api_hash.trim();
+      }
+
+      const res = await apiClient.post('/retention/userbot/request-code', payload);
       setLoginAttemptId(res.data.login_attempt_id);
       setUserbotStep(2);
       setNeeds2fa(false);
@@ -1328,139 +1339,31 @@ export default function RetentionDashboard({ onNavigate }) {
                   </div>
                 </div>
 
-                {/* GUIDE ACCORDION: How to get API ID and API HASH */}
-                <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-950">
-                  <button
-                    type="button"
-                    onClick={() => setShowTelegramGuide(prev => !prev)}
-                    className="w-full p-4 flex items-center justify-between text-right hover:bg-slate-900/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <HelpCircle className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-white">
-                        📘 كيف تستخرج الـ API ID والـ API HASH في دقيقة واحدة من my.telegram.org؟
-                      </span>
-                    </div>
-                    {showTelegramGuide ? (
-                      <ChevronUp className="w-4 h-4 text-slate-400" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-slate-400" />
-                    )}
-                  </button>
-
-                  {showTelegramGuide && (
-                    <div className="p-4 sm:p-5 border-t border-slate-800/80 bg-slate-900/40 space-y-4 text-xs">
-                      {/* Direct Link Card */}
-                      <div className="p-3.5 rounded-xl bg-emerald-950/30 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div>
-                          <span className="text-[11px] text-emerald-400 font-bold block mb-0.5">رابط موقع تيليجرام الرسمي المباشر:</span>
-                          <span className="font-mono text-xs text-white font-bold">https://my.telegram.org</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              navigator.clipboard.writeText('https://my.telegram.org');
-                              alert('تم نسخ الرابط بنجاح!');
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1 border border-slate-700"
-                          >
-                            <Copy className="w-3 h-3" />
-                            <span>نسخ</span>
-                          </button>
-                          <a
-                            href="https://my.telegram.org"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 shadow-sm"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>فتح الموقع ↗</span>
-                          </a>
-                        </div>
-                      </div>
-
-                      {/* Numbered Steps */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">1</span>
-                          <div>
-                            <strong className="block text-white font-bold mb-0.5">تسجيل الدخول:</strong>
-                            <span className="text-slate-400 text-[11px]">ادخل على <span className="font-mono text-emerald-400">my.telegram.org</span> واكتب رقم التيليجرام بصيغته الدولية واضغط Next.</span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">2</span>
-                          <div>
-                            <strong className="block text-white font-bold mb-0.5">إدخال كود التأكيد:</strong>
-                            <span className="text-slate-400 text-[11px]">سيصلك كود داخل محادثة Telegram الرسمية في تطبيقك، انسخه والصقه في الموقع لتسجيل الدخول.</span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">3</span>
-                          <div>
-                            <strong className="block text-white font-bold mb-0.5">اختيار API Tools:</strong>
-                            <span className="text-slate-400 text-[11px]">اضغط على خيار <strong className="text-white">API development tools</strong> من القائمة الظاهرة أمامك.</span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 flex items-start gap-2.5">
-                          <span className="w-6 h-6 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">4</span>
-                          <div>
-                            <strong className="block text-white font-bold mb-0.5">إنشاء ونسخ البيانات:</strong>
-                            <span className="text-slate-400 text-[11px]">اكتب أي اسم بالإنجليزية في App title و Short name (مثلاً: <span className="font-mono text-emerald-400">MyChannelBot</span>) واضغط Create، ثم انسخ الـ <strong>API ID</strong> والـ <strong>API HASH</strong>.</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* WIZARD STEP 1: ENTER CREDENTIALS */}
+                {/* WIZARD STEP 1: ENTER PHONE NUMBER (QUICK CONNECT) */}
                 {userbotStep === 1 && (
                   <form onSubmit={handleRequestUserbotCode} className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                       <span className="text-xs font-bold text-white flex items-center gap-2">
                         <Key className="w-4 h-4 text-emerald-400" />
-                        <span>الخطوة 1 من 2: إدخال بيانات التيليجرام</span>
+                        <span>الخطوة 1 من 2: إدخال رقم الهاتف للربط المباشر</span>
                       </span>
-                      <span className="text-[10px] text-slate-400">مشفر ومحمي 🔒</span>
+                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-bold">⚡ ربط فوري برقم الهاتف</span>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 space-y-1">
+                      <strong className="block text-white font-bold flex items-center gap-1.5">
+                        <Zap className="w-4 h-4 text-amber-400" />
+                        <span>ربط فوري وسريع برقم هاتفك:</span>
+                      </strong>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        اكتب رقم تيليجرام الخاص بك بصيغته الدولية الكاملة، وسنرسل لك كود تحقق سري داخل تطبيق تيليجرام لتأكيد ربط الحساب بالقناة وإرسال الرسائل فوراً للأعضاء المغادرين دون أي توقف!
+                      </p>
+                    </div>
+
+                    <div className="space-y-4">
                       <div>
                         <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          App API ID (أرقام فقط) <span className="text-rose-400">*</span>
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="مثال: 29482710"
-                          value={userbotForm.api_id}
-                          onChange={(e) => setUserbotForm({ ...userbotForm, api_id: e.target.value })}
-                          required
-                          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          App API HASH (نص رموز وحروف) <span className="text-rose-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="مثال: a1b2c3d4e5f6g7h8i9j0..."
-                          value={userbotForm.api_hash}
-                          onChange={(e) => setUserbotForm({ ...userbotForm, api_hash: e.target.value })}
-                          required
-                          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2">
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          رقم هاتف حساب اليوزربوت (بصيغته الدولية الكاملة) <span className="text-rose-400">*</span>
+                          رقم هاتف حساب التيليجرام (بصيغته الدولية الكاملة) <span className="text-rose-400">*</span>
                         </label>
                         <input
                           type="text"
@@ -1468,9 +1371,74 @@ export default function RetentionDashboard({ onNavigate }) {
                           value={userbotForm.phone}
                           onChange={(e) => setUserbotForm({ ...userbotForm, phone: e.target.value })}
                           required
-                          className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                          className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm font-mono outline-none focus:border-emerald-500"
                         />
-                        <span className="text-[10px] text-slate-500 mt-1 block">تأكد من كتابة كود الدولة مسبوقاً بعلامة +، وسيصلك كود التأكيد في تطبيق تيليجرام على هذا الرقم.</span>
+                        <span className="text-[10px] text-slate-500 mt-1 block">تأكد من كتابة كود الدولة مسبوقاً بعلامة +، وسيصلك كود التأكيد في تطبيق تيليجرام على هذا الرقم مباشرة.</span>
+                      </div>
+
+                      {/* Advanced custom API ID / HASH toggle */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setUseCustomApi(!useCustomApi)}
+                          className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                          <span>{useCustomApi ? 'إخفاء الإعدادات المتقدمة (استخدام مفاتيح النظام الافتراضية)' : '⚙️ إعدادات متقدمة للمطورين (اختياري: كتابة API ID و API HASH مخصص)'}</span>
+                        </button>
+
+                        {useCustomApi && (
+                          <div className="mt-3 p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4 animate-in fade-in">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                  App API ID (أرقام فقط)
+                                </label>
+                                <input
+                                  type="number"
+                                  placeholder="مثال: 29482710"
+                                  value={userbotForm.api_id}
+                                  onChange={(e) => setUserbotForm({ ...userbotForm, api_id: e.target.value })}
+                                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                                  App API HASH (نص رموز وحروف)
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="مثال: a1b2c3d4e5f6g7h8i9j0..."
+                                  value={userbotForm.api_hash}
+                                  onChange={(e) => setUserbotForm({ ...userbotForm, api_hash: e.target.value })}
+                                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                                />
+                              </div>
+                            </div>
+
+                            {/* GUIDE ACCORDION: How to get API ID and API HASH */}
+                            <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950 p-3.5 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-bold text-emerald-400">
+                                  📘 استخراج API ID من my.telegram.org
+                                </span>
+                                <a
+                                  href="https://my.telegram.org"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>فتح my.telegram.org ↗</span>
+                                </a>
+                              </div>
+                              <p className="text-[10px] text-slate-400 leading-normal">
+                                ادخل على موقع my.telegram.org برقم هاتفك، اضغط على API development tools، اكتب أي اسم بالإنجليزية للتطبيق وانسخ الـ API ID والـ API HASH وضعهما في الحقول أعلاه.
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1483,12 +1451,12 @@ export default function RetentionDashboard({ onNavigate }) {
                         {sendingOtp ? (
                           <>
                             <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>جاري الاتصال وإرسال الكود...</span>
+                            <span>جاري إرسال كود التحقق إلى تيليجرام...</span>
                           </>
                         ) : (
                           <>
                             <Send className="w-4 h-4" />
-                            <span>إرسال كود التحقق 📲</span>
+                            <span>إرسال كود التحقق لتطبيق تيليجرام 📲</span>
                           </>
                         )}
                       </button>

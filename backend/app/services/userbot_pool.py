@@ -205,6 +205,13 @@ class UserbotPool:
                 except Exception:
                     entity = target_user_id
 
+            # Simulate natural human typing action to satisfy Telegram anti-spam heuristics
+            try:
+                async with client.action(entity, 'typing'):
+                    await asyncio.sleep(random.uniform(1.2, 2.2))
+            except Exception:
+                pass
+
             # Send message
             sent_msg = await client.send_message(entity, text)
             session.daily_contacts_count += 1
@@ -253,8 +260,8 @@ class UserbotPool:
             }
 
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError. Brief cooldown of 60s.")
-            session.cooldown_until = time.time() + 60
+            logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError.")
+            session.cooldown_until = time.time() + 3600
             session.last_error = "PeerFloodError"
 
             # Failover to secondary session if healthy
@@ -266,9 +273,9 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "حساب اليوزربوت مقيد مؤقتاً لدقيقة واحدة من تيليجرام لمراسلة غير جهات الاتصال. يمكنك المراسلة عبر زر تيليجرام ↗ مباشرة من حسابك.",
+                "error_ar": "حساب المجمع العام مقيد مؤقتاً اليوم من تيليجرام لمراسلة الغرباء. للإرسال الفوري لجميع الأعضاء الـ 19 الآن: اربط حساب قناتك في تاب 'حالة اليوزربوت' برقمك مباشرة، أو اضغط زر [تيليجرام ↗] للمراسلة المباشرة.",
                 "can_retry": True,
-                "retry_delay_seconds": 60
+                "retry_delay_seconds": 3600
             }
 
         except FloodWaitError as fwe:
