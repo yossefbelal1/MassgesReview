@@ -11,7 +11,9 @@ import {
   LogOut,
   Zap,
   Shield,
-  UserCheck
+  UserCheck,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -130,6 +132,25 @@ export default function Sidebar({ currentTab, setCurrentTab, adminViewMode, setA
             </button>
           );
         })}
+
+        {/* Standalone Win-back Portal Quick Access */}
+        <div className="pt-2">
+          <a
+            href="/winback"
+            className="w-full flex items-center justify-between p-3 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900 to-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 text-white transition-all group shadow-md shadow-emerald-950/30"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-xl bg-emerald-600/30 text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Sparkles className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-right truncate">
+                <span className="text-xs font-bold block text-emerald-300 truncate">منصة استعادة الأعضاء</span>
+                <span className="text-[9px] text-slate-400 block truncate">داش بورد مستقل برابط خاص ↗</span>
+              </div>
+            </div>
+            <ExternalLink className="w-3.5 h-3.5 text-slate-500 group-hover:text-emerald-400 shrink-0 mr-1" />
+          </a>
+        </div>
       </div>
 
       {/* User Footer */}

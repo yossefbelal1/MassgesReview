@@ -57,7 +57,15 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('reviewflow_token');
     localStorage.removeItem('reviewflow_user');
     setUser(null);
-    window.location.href = '/login';
+    const isWinback = window.location.pathname.startsWith('/winback') || 
+                      window.location.pathname.startsWith('/retention') ||
+                      window.location.hostname.startsWith('winback') || 
+                      window.location.hostname.startsWith('retention');
+    if (isWinback) {
+      window.location.href = window.location.hostname.startsWith('winback') ? '/login' : '/winback/login';
+    } else {
+      window.location.href = '/login';
+    }
   };
 
   return (

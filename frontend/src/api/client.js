@@ -25,8 +25,15 @@ apiClient.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('reviewflow_token');
       localStorage.removeItem('reviewflow_user');
-      if (window.location.pathname !== '/login' && window.location.pathname !== '/register') {
-        window.location.href = '/login';
+      const isWinback = window.location.pathname.startsWith('/winback') || 
+                        window.location.pathname.startsWith('/retention') ||
+                        window.location.hostname.startsWith('winback') || 
+                        window.location.hostname.startsWith('retention');
+      const targetLogin = isWinback 
+        ? (window.location.hostname.startsWith('winback') ? '/login' : '/winback/login')
+        : '/login';
+      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+        window.location.href = targetLogin;
       }
     }
     return Promise.reject(error);

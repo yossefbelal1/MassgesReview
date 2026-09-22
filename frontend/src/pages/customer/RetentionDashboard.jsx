@@ -38,11 +38,22 @@ const WINBACK_TEMPLATES = [
   }
 ];
 
-export default function RetentionDashboard({ onNavigate }) {
+export default function RetentionDashboard({ onNavigate, externalTab, onTabChange }) {
   const [channels, setChannels] = useState([]);
   const [selectedChannelId, setSelectedChannelId] = useState('');
-  const [activeTab, setActiveTab] = useState('cases'); // 'cases', 'analytics', 'members', 'settings', 'userbots'
+  const [activeTab, setActiveTab] = useState(externalTab || 'cases'); // 'cases', 'analytics', 'members', 'settings', 'userbots'
   
+  useEffect(() => {
+    if (externalTab && externalTab !== activeTab) {
+      setActiveTab(externalTab);
+    }
+  }, [externalTab]);
+
+  const handleTabSelect = (tab) => {
+    setActiveTab(tab);
+    if (onTabChange) onTabChange(tab);
+  };
+
   const [summary, setSummary] = useState(null);
   const [cases, setCases] = useState([]);
   const [members, setMembers] = useState([]);
@@ -601,7 +612,7 @@ export default function RetentionDashboard({ onNavigate }) {
       {/* Navigation Tabs */}
       <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 rounded-2xl border border-slate-800 overflow-x-auto text-xs">
         <button
-          onClick={() => setActiveTab('cases')}
+          onClick={() => handleTabSelect('cases')}
           className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
             activeTab === 'cases' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
           }`}
@@ -611,7 +622,7 @@ export default function RetentionDashboard({ onNavigate }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('analytics')}
+          onClick={() => handleTabSelect('analytics')}
           className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
             activeTab === 'analytics' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
           }`}
@@ -621,7 +632,7 @@ export default function RetentionDashboard({ onNavigate }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('members')}
+          onClick={() => handleTabSelect('members')}
           className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
             activeTab === 'members' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
           }`}
@@ -631,7 +642,7 @@ export default function RetentionDashboard({ onNavigate }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('settings')}
+          onClick={() => handleTabSelect('settings')}
           className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
             activeTab === 'settings' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
           }`}
@@ -641,7 +652,7 @@ export default function RetentionDashboard({ onNavigate }) {
         </button>
 
         <button
-          onClick={() => setActiveTab('userbots')}
+          onClick={() => handleTabSelect('userbots')}
           className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
             activeTab === 'userbots' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
           }`}

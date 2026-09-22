@@ -22,6 +22,9 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import CustomerList from './pages/admin/CustomerList';
 import PlansManager from './pages/admin/PlansManager';
 
+// Standalone Winback App
+import WinbackApp from './apps/winback/WinbackApp';
+
 function MainApp() {
   const { user, loading } = useAuth();
   const [authMode, setAuthMode] = useState('login'); // 'login' or 'register'
@@ -147,9 +150,30 @@ function MainApp() {
 }
 
 export default function App() {
+  const isWinbackRoute = () => {
+    const path = window.location.pathname.toLowerCase();
+    const host = window.location.hostname.toLowerCase();
+    return (
+      path.startsWith('/winback') || 
+      path.startsWith('/retention') || 
+      host.startsWith('winback.') || 
+      host.startsWith('retention.')
+    );
+  };
+
+  const [inWinbackMode, setInWinbackMode] = useState(isWinbackRoute());
+
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setInWinbackMode(isWinbackRoute());
+    };
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
   return (
     <AuthProvider>
-      <MainApp />
+      {inWinbackMode ? <WinbackApp /> : <MainApp />}
     </AuthProvider>
   );
 }
