@@ -699,6 +699,38 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             </div>
           )}
 
+          {/* Funnel Mathematical Reconciliation Card */}
+          {summary && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-slate-800 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs animate-in fade-in">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-white flex items-center gap-1.5 text-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>مطابقة القمع الحسابية (بيانات حقيقية 100%):</span>
+                </span>
+                <span className="px-2.5 py-1 rounded-xl bg-slate-800 text-slate-300 font-mono text-[11px] font-bold">
+                  إجمالي المغادرين: <strong className="text-white">{summary.total_left_detected || 0}</strong>
+                </span>
+                <span className="text-slate-600 font-bold">=</span>
+                <span className="px-2.5 py-1 rounded-xl bg-blue-500/10 text-blue-300 font-mono text-[11px] font-bold border border-blue-500/20">
+                  تم التواصل: <strong className="text-white">{summary.total_contacted || 0}</strong>
+                </span>
+                <span className="text-slate-600 font-bold">+</span>
+                <span className="px-2.5 py-1 rounded-xl bg-purple-500/10 text-purple-300 font-mono text-[11px] font-bold border border-purple-500/20">
+                  في طابور الإرسال: <strong className="text-white">{summary.total_scheduled_pending || 0}</strong>
+                </span>
+                <span className="text-slate-600 font-bold">+</span>
+                <span className="px-2.5 py-1 rounded-xl bg-sky-500/10 text-sky-300 font-mono text-[11px] font-bold border border-sky-500/20">
+                  حماية الخصوصية: <strong className="text-white">{summary.uncontactable_count || 0}</strong>
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-emerald-400 font-extrabold bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-xl shadow-sm">
+                  🎉 عادوا للقناة (نجاح الاسترداد): {summary.total_rejoined || 0} عضو ({summary.win_back_rate_percent || 0}%)
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Filters Bar */}
           <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
             <div className="relative flex-1">
@@ -791,6 +823,11 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                                 {c.user_username && (
                                   <span className="block text-[10px] text-slate-400 font-mono font-normal">@{c.user_username}</span>
                                 )}
+                                {c.queue_delay_reason && c.status === 'SCHEDULED' && (
+                                  <span className="block text-[10px] text-amber-400 font-medium mt-0.5 leading-tight" title={c.queue_delay_reason}>
+                                    ⏱️ {c.queue_delay_reason}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -817,15 +854,20 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                             {new Date(c.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
                           </td>
                           <td className="p-3.5 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
-                              <button
-                                onClick={() => openCaseChat(c)}
-                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold transition-all inline-flex items-center gap-1.5"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                <span>المحادثة</span>
-                              </button>
-                              {c.user_username ? (
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {/* 1-Click Instant Telegram Direct Link */}
+                              {c.direct_telegram_link ? (
+                                <a
+                                  href={c.direct_telegram_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-sky-500/20 to-blue-500/20 hover:from-sky-500/30 hover:to-blue-500/30 text-sky-300 text-xs font-black border border-sky-500/40 transition-all inline-flex items-center gap-1 shadow-sm active:scale-95"
+                                  title="فتح محادثة تيليجرام مع رسالة الاسترداد معبأة وجاهزة للإرسال فوراً بضغطة زر"
+                                >
+                                  <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-pulse" />
+                                  <span>مراسلة فورية ⚡</span>
+                                </a>
+                              ) : c.user_username ? (
                                 <a
                                   href={`https://t.me/${c.user_username}`}
                                   target="_blank"
@@ -846,6 +888,14 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                                   <span>تيليجرام</span>
                                 </a>
                               )}
+
+                              <button
+                                onClick={() => openCaseChat(c)}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold transition-all inline-flex items-center gap-1.5"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>المحادثة</span>
+                              </button>
                               {c.status !== 'RECOVERED' && c.status !== 'CONTACTED' && c.status !== 'CONVERSATION_ACTIVE' && (
                                 <button
                                   onClick={() => handleSendCaseNow(c.id)}

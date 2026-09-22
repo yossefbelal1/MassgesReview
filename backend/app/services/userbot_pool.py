@@ -193,12 +193,12 @@ class UserbotPool:
             await asyncio.sleep(random.uniform(1.5, 3.0))
 
         try:
-            # 1. If access_hash is provided, use InputPeerUser directly (100% reliable across restarts)
-            if access_hash:
+            # 1. Prioritize canonical public username first (most reliable and avoids stale access_hash)
+            if target_username and str(target_username).strip():
+                entity = target_username.strip().lstrip('@')
+            elif access_hash:
                 from telethon.tl.types import InputPeerUser
                 entity = InputPeerUser(int(target_user_id), int(access_hash))
-            elif target_username:
-                entity = target_username
             else:
                 try:
                     entity = await client.get_entity(target_user_id)
@@ -261,7 +261,7 @@ class UserbotPool:
 
         except PeerFloodError:
             logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError.")
-            session.cooldown_until = time.time() + 3600
+            session.cooldown_until = time.time() + 900
             session.last_error = "PeerFloodError"
 
             # Failover to secondary session if healthy
@@ -273,9 +273,9 @@ class UserbotPool:
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "حساب المجمع العام مقيد مؤقتاً اليوم من تيليجرام لمراسلة الغرباء. للإرسال الفوري لجميع الأعضاء الـ 19 الآن: اربط حساب قناتك في تاب 'حالة اليوزربوت' برقمك مباشرة، أو اضغط زر [تيليجرام ↗] للمراسلة المباشرة.",
+                "error_ar": "حساب المجمع العام مقيد مؤقتاً من تيليجرام لمراسلة الغرباء. للإرسال الفوري لجميع الأعضاء الآن: اربط حساب قناتك في تاب 'حالة اليوزربوت' برقمك مباشرة، أو استخدم زر المراسلة الفورية [تيليجرام ⚡] في الجدول بالأسفل.",
                 "can_retry": True,
-                "retry_delay_seconds": 3600
+                "retry_delay_seconds": 900
             }
 
         except FloodWaitError as fwe:

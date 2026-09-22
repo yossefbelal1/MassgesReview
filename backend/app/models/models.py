@@ -93,6 +93,8 @@ class Channel(Base):
     verified_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen_message_id = Column(Integer, default=0)
     last_seen_admin_log_id = Column(String, default="0")
+    last_admin_log_sync_at = Column(DateTime, nullable=True)
+    sync_status = Column(String, default="ACTIVE")  # ACTIVE, POLLING, RESTRICTED
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -324,6 +326,7 @@ class RecoveryCase(Base):
     __table_args__ = (
         Index("idx_case_tenant_channel_status", "tenant_id", "channel_id", "status"),
         Index("idx_case_tg_user_status", "telegram_user_id", "status"),
+        Index("idx_case_status_scheduled", "status", "scheduled_contact_at"),
     )
 
     tenant = relationship("Tenant", back_populates="recovery_cases")

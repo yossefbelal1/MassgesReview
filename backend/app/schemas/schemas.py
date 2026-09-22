@@ -301,6 +301,8 @@ class RecoveryCaseOut(BaseModel):
     rejoined_at: Optional[datetime]
     time_to_rejoin_seconds: Optional[int]
     created_at: datetime
+    direct_telegram_link: Optional[str] = None
+    queue_delay_reason: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -313,11 +315,14 @@ class RetentionSummaryOut(BaseModel):
     total_contacted: int
     total_in_conversation: int
     total_rejoined: int
+    total_scheduled_pending: int = 0
+    total_opt_out: int = 0
     win_back_rate_percent: float
     uncontactable_count: int
     average_rejoin_hours: float
     reasons_breakdown: List[dict] = []
     daily_trend: List[dict] = []
+    funnel_reconciled: bool = True
 
 # Dedicated Channel Userbot Schemas
 class UserbotSendCodeRequest(BaseModel):

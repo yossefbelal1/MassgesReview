@@ -43,6 +43,8 @@ def get_retention_summary(
     total_contacted = base_query.filter(RecoveryCase.first_contacted_at.isnot(None)).count()
     total_in_conversation = base_query.filter(RecoveryCase.status == "CONVERSATION_ACTIVE").count()
     uncontactable_count = base_query.filter(RecoveryCase.status == "UNCONTACTABLE").count()
+    total_scheduled = base_query.filter(RecoveryCase.status.in_(["SCHEDULED", "DETECTED"])).count()
+    total_opt_out = base_query.filter(RecoveryCase.status == "OPT_OUT").count()
 
     win_back_rate = round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0
 
@@ -111,11 +113,14 @@ def get_retention_summary(
         "total_contacted": total_contacted,
         "total_in_conversation": total_in_conversation,
         "total_rejoined": total_rejoined,
+        "total_scheduled_pending": total_scheduled,
+        "total_opt_out": total_opt_out,
         "win_back_rate_percent": win_back_rate,
         "uncontactable_count": uncontactable_count,
         "average_rejoin_hours": avg_rejoin_hours,
         "reasons_breakdown": reasons_breakdown,
-        "daily_trend": daily_trend
+        "daily_trend": daily_trend,
+        "funnel_reconciled": True
     }
 
 
@@ -142,7 +147,18 @@ def get_recovery_cases(
     query = query.order_by(desc(RecoveryCase.created_at))
     cases = query.limit(limit).all()
 
-    # Hydrate user details and channel titles
+    # Pre-cache retention settings and dedicated userbots for fast mapping
+    channel_ids = {c.channel_id for c in cases}
+    settings_map = {
+        s.channel_id: s for s in db.query(RetentionSetting).filter(RetentionSetting.channel_id.in_(channel_ids)).all()
+    } if channel_ids else {}
+    dedicated_set = {
+        u.channel_id for u in db.query(ChannelUserbot.channel_id).filter(
+            ChannelUserbot.channel_id.in_(channel_ids),
+            ChannelUserbot.is_active == True
+        ).all()
+    } if channel_ids else set()
+
     result = []
     for c in cases:
         channel_title = c.channel.title if c.channel else "Unknown"
@@ -152,6 +168,18 @@ def get_recovery_cases(
             parts = [c.member.first_name or "", c.member.last_name or ""]
             user_name = " ".join(p for p in parts if p).strip() or None
             user_username = c.member.username
+
+        ch_settings = settings_map.get(c.channel_id)
+        direct_link = retention_engine.generate_direct_outreach_link(c.channel, ch_settings, c)
+
+        queue_reason = None
+        if c.status in ["SCHEDULED", "DETECTED"]:
+            if c.channel_id in dedicated_set:
+                queue_reason = "مجدول للإرسال التلقائي عبر يوزربوت القناة المخصص"
+            else:
+                queue_reason = "في طابور الإرسال (يعمل عبر حساب المنصة المشترك - يوصى بربط يوزربوت القناة)"
+        elif c.status == "UNCONTACTABLE":
+            queue_reason = "حساب المستخدم مقيد الخصوصية أو محذوف"
 
         item = RecoveryCaseOut(
             id=c.id,
@@ -174,7 +202,9 @@ def get_recovery_cases(
             link_sent_at=c.link_sent_at,
             rejoined_at=c.rejoined_at,
             time_to_rejoin_seconds=c.time_to_rejoin_seconds,
-            created_at=c.created_at
+            created_at=c.created_at,
+            direct_telegram_link=direct_link,
+            queue_delay_reason=queue_reason
         )
         if search:
             s = search.lower()
@@ -227,6 +257,22 @@ def get_case_detail(
         ) for m in case.messages
     ]
 
+    settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == case.channel_id).first()
+    direct_link = retention_engine.generate_direct_outreach_link(case.channel, settings, case)
+
+    queue_reason = None
+    if case.status in ["SCHEDULED", "DETECTED"]:
+        has_dedicated = db.query(ChannelUserbot).filter(
+            ChannelUserbot.channel_id == case.channel_id,
+            ChannelUserbot.is_active == True
+        ).first()
+        if not has_dedicated:
+            queue_reason = "في طابور الإرسال (يعمل عبر حساب المنصة المشترك - يوصى بربط يوزربوت القناة)"
+        else:
+            queue_reason = "مجدول للإرسال التلقائي عبر يوزربوت القناة المخصص"
+    elif case.status == "UNCONTACTABLE":
+        queue_reason = "حساب المستخدم مقيد الخصوصية أو محذوف"
+
     return RecoveryCaseDetailOut(
         id=case.id,
         tenant_id=case.tenant_id,
@@ -249,6 +295,8 @@ def get_case_detail(
         rejoined_at=case.rejoined_at,
         time_to_rejoin_seconds=case.time_to_rejoin_seconds,
         created_at=case.created_at,
+        direct_telegram_link=direct_link,
+        queue_delay_reason=queue_reason,
         messages=messages
     )
 

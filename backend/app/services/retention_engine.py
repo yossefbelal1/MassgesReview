@@ -196,12 +196,19 @@ class RetentionEngine:
                         access_hash=access_hash
                     )
 
+            channel.last_admin_log_sync_at = datetime.now(timezone.utc)
+            channel.sync_status = "ACTIVE"
             if max_seen_id > last_id:
                 channel.last_seen_admin_log_id = str(max_seen_id)
-                db.commit()
+            db.commit()
 
         except Exception as err:
             logger.error(f"[!] Error fetching admin log for {channel.title}: {err}", exc_info=True)
+            channel.sync_status = "ERROR"
+            try:
+                db.commit()
+            except Exception:
+                pass
 
         return events_processed
 
@@ -387,6 +394,45 @@ class RetentionEngine:
             int_hash = int(access_hash) if access_hash else None
             await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name, username, int_hash)
 
+    def build_recovery_outbound_text(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> str:
+        """Builds customized recovery text with placeholders substituted."""
+        first_name = case.member.first_name if case.member else "يا غالي"
+        default_template = (
+            "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
+            "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
+            "{invite_link}"
+        )
+        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
+
+        if invite_url:
+            if "{invite_link}" in template:
+                template = template.replace("{invite_link}", invite_url)
+            else:
+                template = f"{template.rstrip()}\n\n{invite_url}"
+
+        ch_title = channel.title if channel else ""
+        return template.replace("{name}", first_name or "يا غالي")\
+                       .replace("{channel}", ch_title)\
+                       .replace("{invite_link}", invite_url or "")
+
+    def generate_direct_outreach_link(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> Optional[str]:
+        """
+        Generates a direct 1-click Telegram deep link with the pre-filled recovery text.
+        Works seamlessly in Telegram Web, Desktop, and Mobile.
+        """
+        import urllib.parse
+        outbound_text = self.build_recovery_outbound_text(channel, settings, case)
+        encoded_text = urllib.parse.quote(outbound_text)
+
+        username = case.member.username if case.member else None
+        if username and str(username).strip():
+            clean_u = str(username).strip().lstrip('@')
+            return f"https://t.me/{clean_u}?text={encoded_text}"
+        elif case.telegram_user_id:
+            return f"tg://user?id={case.telegram_user_id}"
+        return None
+
     async def send_recovery_to_case(self, db: Session, case: RecoveryCase) -> Dict[str, Any]:
         """
         Dispatches initial win-back outreach message immediately to a specific recovery case.
@@ -398,28 +444,8 @@ class RetentionEngine:
             return {"success": False, "error": "CHANNEL_NOT_FOUND"}
 
         settings = db.query(RetentionSetting).filter(RetentionSetting.channel_id == channel.id).first()
-        first_name = case.member.first_name if case.member else "يا غالي"
         username = case.member.username if case.member else None
-
-        # Empathetic, respectful recovery opener with direct invite link
-        default_template = (
-            "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
-            "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
-            "{invite_link}"
-        )
-        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
-        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
-
-        # Ensure invite link is always included if configured
-        if invite_url:
-            if "{invite_link}" in template:
-                template = template.replace("{invite_link}", invite_url)
-            else:
-                template = f"{template.rstrip()}\n\n{invite_url}"
-
-        outbound_text = template.replace("{name}", first_name or "يا غالي")\
-                                .replace("{channel}", channel.title)\
-                                .replace("{invite_link}", invite_url or "")
+        outbound_text = self.build_recovery_outbound_text(channel, settings, case)
 
         # Attempt sending via dedicated channel userbot or fallback to shared UserbotPool
         access_hash = None
