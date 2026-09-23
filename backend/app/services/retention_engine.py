@@ -537,42 +537,54 @@ class RetentionEngine:
             except (ValueError, TypeError):
                 access_hash = None
 
-        has_dedicated = db.query(ChannelUserbot).filter(
-            ChannelUserbot.channel_id == channel.id,
-            ChannelUserbot.is_active == True
-        ).first()
+        # Multi-account Load Balancing for the tenant
+        tenant_userbots = db.query(ChannelUserbot).filter(
+            ChannelUserbot.tenant_id == channel.tenant_id,
+            ChannelUserbot.is_active == True,
+            ChannelUserbot.status == "CONNECTED"
+        ).all()
 
-        # Cross-channel safety check: prevent bombarding the same user across different channels if using shared userbot
-        if not has_dedicated:
-            recent_msg = db.query(RecoveryMessage).join(RecoveryCase).filter(
-                RecoveryCase.telegram_user_id == case.telegram_user_id,
-                RecoveryMessage.direction == "OUTBOUND",
-                RecoveryMessage.sent_at >= now - timedelta(minutes=15)
-            ).first()
-            if recent_msg:
-                case.scheduled_contact_at = now + timedelta(minutes=15)
-                db.commit()
-                logger.info(f"[⏸️ Cross-Channel Pacing]: User {case.telegram_user_id} was recently messaged for another channel. Deferred 15m.")
-                return {"success": False, "error": "USER_RECENTLY_MESSAGED_CROSS_CHANNEL", "can_retry": True, "retry_delay_seconds": 900}
+        ready_userbots = [
+            ub for ub in tenant_userbots
+            if (not ub.cooldown_until or ub.cooldown_until <= now)
+            and (ub.daily_contacts_count or 0) < 35
+        ]
 
-        if has_dedicated:
+        if ready_userbots:
+            # Sort by least contacts sent today to balance load equally across accounts
+            ready_userbots.sort(key=lambda ub: ub.daily_contacts_count or 0)
+            # Prefer the userbot assigned to this channel if ready, otherwise least-used
+            chosen_userbot = next((ub for ub in ready_userbots if ub.channel_id == channel.id), ready_userbots[0])
+
             res = await dedicated_userbot_service.send_direct_message_for_channel(
                 db=db,
-                channel_id=channel.id,
+                channel_id=chosen_userbot.channel_id,
                 target_user_id=int(case.telegram_user_id),
                 text=outbound_text,
                 target_username=username,
                 access_hash=access_hash
             )
-            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT"]:
-                logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
-                res = await userbot_pool.send_direct_message(
-                    target_user_id=int(case.telegram_user_id),
-                    text=outbound_text,
-                    channel_id=channel.id,
-                    target_username=username,
-                    access_hash=access_hash
-                )
+            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD", "DAILY_QUOTA_REACHED"]:
+                alternate_userbots = [ub for ub in ready_userbots if ub != chosen_userbot]
+                if alternate_userbots:
+                    logger.info(f"[🔄 Multi-Account Load Balance]: Failover to alternate userbot {alternate_userbots[0].phone}")
+                    res = await dedicated_userbot_service.send_direct_message_for_channel(
+                        db=db,
+                        channel_id=alternate_userbots[0].channel_id,
+                        target_user_id=int(case.telegram_user_id),
+                        text=outbound_text,
+                        target_username=username,
+                        access_hash=access_hash
+                    )
+                else:
+                    logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
+                    res = await userbot_pool.send_direct_message(
+                        target_user_id=int(case.telegram_user_id),
+                        text=outbound_text,
+                        channel_id=channel.id,
+                        target_username=username,
+                        access_hash=access_hash
+                    )
         else:
             res = await userbot_pool.send_direct_message(
                 target_user_id=int(case.telegram_user_id),
@@ -636,6 +648,14 @@ class RetentionEngine:
         if not pending_cases:
             return
 
+        # Check count of active dedicated userbots to calculate dynamic safe pacing
+        active_bots = db.query(ChannelUserbot).filter(
+            ChannelUserbot.is_active == True,
+            ChannelUserbot.status == "CONNECTED"
+        ).count()
+        # With 1 bot: 15s. With 2+ bots: dynamic pacing 7.5s (each account still preserves 15s between its own sends)
+        pacing_delay = 15.0 if active_bots <= 1 else max(7.0, 15.0 / active_bots)
+
         sent_count = 0
         for case in pending_cases:
             res = await self.send_recovery_to_case(db, case)
@@ -645,11 +665,11 @@ class RetentionEngine:
                 # Circuit breaker: stop batch immediately, don't make things worse
                 logger.info(f"[⚠️ Outreach Paused]: {res.get('error')} — stopping batch to avoid amplifying ban.")
                 break
-            # Strict human anti-spam pacing of 15 seconds as commanded
-            await asyncio.sleep(15.0)
+            # Safe pacing between contacts
+            await asyncio.sleep(pacing_delay)
 
         if sent_count > 0:
-            logger.info(f"[📊 Outreach Batch]: Sent {sent_count}/{len(pending_cases)} recovery messages this cycle.")
+            logger.info(f"[📊 Outreach Batch]: Sent {sent_count}/{len(pending_cases)} recovery messages this cycle (pacing: {pacing_delay}s).")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

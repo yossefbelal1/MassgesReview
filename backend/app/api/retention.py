@@ -699,12 +699,43 @@ def update_channel_retention_settings(
 
 @router.get("/userbots")
 async def get_userbots_status(
+    system_pool: bool = False,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Returns real-time operational status, quotas, and health for the Userbot pool.
+    Returns the tenant's connected dedicated userbots with their channel names and live health.
+    For system administrators, passing system_pool=true returns the internal fallback fleet.
     """
-    return await userbot_pool.get_pool_status()
+    if system_pool and current_user.role == "admin":
+        return await userbot_pool.get_pool_status()
+
+    now = datetime.now(timezone.utc)
+    userbots = db.query(ChannelUserbot).filter(
+        ChannelUserbot.tenant_id == tenant_id
+    ).all()
+
+    result = []
+    for ub in userbots:
+        ch = db.query(Channel).filter(Channel.id == ub.channel_id).first()
+        result.append({
+            "id": ub.id,
+            "name": ub.channel_id,
+            "channel_id": ub.channel_id,
+            "channel_title": ch.title if ch else "قناة غير معروفة",
+            "phone": ub.phone,
+            "username": ub.username or "",
+            "first_name": ub.first_name or "",
+            "is_active": ub.is_active,
+            "is_healthy": ub.status == "CONNECTED" and ub.is_active,
+            "status": ub.status,
+            "daily_contacts_sent": ub.daily_contacts_count or 0,
+            "max_daily_contacts": 35,
+            "in_cooldown": bool(ub.cooldown_until and ub.cooldown_until > now),
+            "created_at": ub.created_at.isoformat() if ub.created_at else None
+        })
+    return result
 
 
 @router.get("/userbots/{session_name}/avatar")

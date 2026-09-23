@@ -271,17 +271,20 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     }
   };
 
-  const handleDisconnectDedicatedUserbot = async () => {
-    if (!selectedChannelId) return;
-    if (!window.confirm('هل أنت متأكد من فصل اليوزربوت المخصص عن هذه القناة؟ ستتحول القناة تلقائياً لاستخدام مجمع اليوزربوت العام.')) {
+  const handleDisconnectDedicatedUserbot = async (targetChannelId = null) => {
+    const chId = targetChannelId || selectedChannelId;
+    if (!chId) return;
+    if (!window.confirm('هل أنت متأكد من فصل هذا الحساب عن القناة؟')) {
       return;
     }
 
     try {
       setActionLoading(true);
-      const res = await apiClient.delete(`/retention/userbot/${selectedChannelId}`);
-      showToast(res.data?.message || 'تم فصل اليوزربوت بنجاح.', 'success');
-      setDedicatedUserbot(null);
+      const res = await apiClient.delete(`/retention/userbot/${chId}`);
+      showToast(res.data?.message || 'تم فصل الحساب بنجاح.', 'success');
+      if (chId === selectedChannelId) {
+        setDedicatedUserbot(null);
+      }
       fetchData();
     } catch (err) {
       showToast('فشل فصل الحساب: ' + (err.response?.data?.detail || err.message), 'error');
@@ -1788,99 +1791,99 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             )}
           </div>
 
-          {/* SECTION 2: SYSTEM SHARED USERBOT FLEET (FALLBACK) */}
+          {/* SECTION 2: CONNECTED ACCOUNTS & LOAD BALANCING */}
           <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Bot className="w-4 h-4 text-blue-400" />
-                  <span>مجمع اليوزربوت العام للنظام (Shared Fallback Fleet)</span>
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>حساباتك المتصلة ونظام توزيع الحمل (Load Balancing)</span>
                 </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">يعمل كاحتياطي تلقائي للقنوات التي لم تقم بربط يوزربوت مخصص بعد.</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  توزيع رسائل المتابعة بالتساوي بين حساباتك لمضاعفة سرعة الإرسال وإنهاء طابور المغادرين فوراً بأمان.
+                </p>
               </div>
-              <span className="text-xs text-slate-400">
-                {userbots.filter(b => b.is_healthy).length} من أصل {userbots.length} متصل
+              <span className="text-xs text-slate-400 font-semibold">
+                {userbots.filter(b => b.is_healthy).length} حساب نشط
               </span>
             </div>
 
-            <div className="space-y-3">
-              {userbots.map((b, i) => (
-                <div key={i} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3.5">
-                    {/* Userbot Avatar with Upload overlay */}
-                    <div className="relative group w-12 h-12 rounded-2xl overflow-hidden bg-slate-900 border-2 border-emerald-500/30 flex items-center justify-center shrink-0 shadow-inner">
-                      {b.has_photo ? (
-                        <img
-                          src={`/api/v1/retention/userbots/${b.name}/avatar?t=${avatarTimestamp}`}
-                          alt={b.username}
-                          className="w-full h-full object-cover"
-                          onError={(e) => { e.target.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-xs font-bold bg-slate-900">
-                          <Bot className="w-5 h-5 text-emerald-400 mb-0.5" />
-                          <span className="text-[9px] font-mono">@{b.username ? b.username.slice(0, 4) : 'bot'}</span>
-                        </div>
-                      )}
-                      {/* Hover Upload Overlay */}
-                      <label 
-                        className="absolute inset-0 bg-slate-950/80 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-[9px] text-white cursor-pointer transition-opacity font-semibold"
-                        title="اضغط لرفع صورة بروفايل جديدة لهذا الحساب على تيليجرام"
-                      >
-                        <Camera className="w-4 h-4 text-emerald-400 mb-0.5" />
-                        <span>تغيير</span>
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          className="hidden"
-                          disabled={uploadingAvatar}
-                          onChange={(e) => handleAvatarUpload(b.name, e)}
-                        />
-                      </label>
-                    </div>
+            {/* Load Balancing status banner */}
+            {userbots.length >= 2 ? (
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2.5">
+                <Zap className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+                <span>
+                  <strong>توزيع الحمل نشط ومفعّل ⚡:</strong> يتم توزيع طابور المغادرين بالتناوب بين <strong>{userbots.length} حسابات</strong> لمضاعفة سرعة الإرسال مرتين مع الحفاظ على الأمان الكامل ضد الحظر!
+                </span>
+              </div>
+            ) : userbots.length === 1 ? (
+              <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 flex items-center gap-2.5">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>حسابك الخاص متصل وجاهز!</strong> لمضاعفة السرعة وإنهاء أي طابور في نصف الوقت، يمكنك اختيار قناة أخرى من القائمة العلوية وربط رقم ثانٍ لتفعيل نظام توزيع الحمل التلقائي.
+                </span>
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 text-center">
+                لا توجد حسابات مخصصة مربوطة حتى الآن. استخدم النموذج أعلاه لربط أول رقم تيليجرام خاص بك.
+              </div>
+            )}
 
-                    <div>
-                      <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                        <span>@{b.username}</span>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-normal">
-                          {b.name === 'primary' ? 'الحساب الأساسي للمنصة' : 'حساب الطوارئ والاحتياط'}
-                        </span>
-                      </h4>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[11px] text-slate-400">
-                          تم إرسال {b.daily_contacts_sent} من أصل {b.max_daily_contacts} رسالة اليوم
-                        </span>
-                        {b.in_cooldown && (
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-semibold">
-                            في فترة انتظار مؤقتة
+            {/* Connected Userbots List */}
+            {userbots.length > 0 && (
+              <div className="space-y-3">
+                {userbots.map((b, i) => (
+                  <div key={i} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold shrink-0">
+                        <Bot className="w-5 h-5 text-emerald-400" />
+                      </div>
+
+                      <div>
+                        <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                          <span className="font-mono">{b.phone}</span>
+                          {b.username && (
+                            <span className="text-[11px] text-slate-400 font-mono">@{b.username}</span>
+                          )}
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
+                            {b.channel_title}
                           </span>
-                        )}
+                        </h4>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[11px] text-slate-400">
+                            تم إرسال <strong className="text-white font-mono">{b.daily_contacts_sent}</strong> من {b.max_daily_contacts} رسالة اليوم
+                          </span>
+                          {b.in_cooldown && (
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-semibold">
+                              انتظار مؤقت
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    <label className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 border border-slate-700">
-                      <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>{uploadingAvatar ? 'جاري الرفع...' : 'تغيير الصورة 📷'}</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        disabled={uploadingAvatar}
-                        onChange={(e) => handleAvatarUpload(b.name, e)}
-                      />
-                    </label>
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <span className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
+                        b.is_healthy ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                      }`}>
+                        {b.is_healthy ? 'متصل وجاهز 🟢' : 'يحتاج فحص 🔴'}
+                      </span>
 
-                    <span className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
-                      b.is_healthy ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                    }`}>
-                      {b.is_healthy ? 'متصل 🟢' : 'يحتاج فحص 🔴'}
-                    </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDisconnectDedicatedUserbot(b.channel_id)}
+                        disabled={actionLoading}
+                        className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold transition-all flex items-center gap-1"
+                        title="فصل هذا الحساب"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>فصل</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
