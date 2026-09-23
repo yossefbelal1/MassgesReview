@@ -85,6 +85,8 @@ class RetentionEngine:
     """
     Audience Retention, Leave Detection, and Conversational Win-back Engine.
     """
+    def __init__(self):
+        self._rr_index: int = 0
 
     async def get_admin_client_for_channel(self, channel: Channel, default_client: TelegramClient) -> TelegramClient:
         """
@@ -541,20 +543,35 @@ class RetentionEngine:
         tenant_userbots = db.query(ChannelUserbot).filter(
             ChannelUserbot.tenant_id == channel.tenant_id,
             ChannelUserbot.is_active == True,
-            ChannelUserbot.status == "CONNECTED"
+            (
+                (ChannelUserbot.status == "CONNECTED") |
+                ((ChannelUserbot.status == "FLOOD_WAIT") & (
+                    (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
+                ))
+            )
         ).all()
+
+        # Auto-heal any bots whose cooldown expired
+        for ub in tenant_userbots:
+            if ub.status == "FLOOD_WAIT" and (not ub.cooldown_until or ub.cooldown_until <= now):
+                ub.status = "CONNECTED"
+                ub.cooldown_until = None
+                ub.last_error = None
+        db.commit()
 
         ready_userbots = [
             ub for ub in tenant_userbots
             if (not ub.cooldown_until or ub.cooldown_until <= now)
-            and (ub.daily_contacts_count or 0) < 35
+            and (ub.daily_contacts_count or 0) < 50
         ]
 
         if ready_userbots:
-            # Sort by least contacts sent today to balance load equally across accounts
-            ready_userbots.sort(key=lambda ub: ub.daily_contacts_count or 0)
-            # Prefer the userbot assigned to this channel if ready, otherwise least-used
-            chosen_userbot = next((ub for ub in ready_userbots if ub.channel_id == channel.id), ready_userbots[0])
+            # Sort deterministically by ID so alternating round-robin is 50/50
+            ready_userbots.sort(key=lambda ub: ub.id)
+            chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
+            self._rr_index += 1
+
+            logger.info(f"[⚖️ Multi-Account 50/50]: Dispatching case {case.id} via {chosen_userbot.phone} (@{chosen_userbot.username})")
 
             res = await dedicated_userbot_service.send_direct_message_for_channel(
                 db=db,
@@ -565,8 +582,8 @@ class RetentionEngine:
                 access_hash=access_hash,
                 userbot_id=chosen_userbot.id
             )
-            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD", "DAILY_QUOTA_REACHED"]:
-                alternate_userbots = [ub for ub in ready_userbots if ub != chosen_userbot]
+            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD", "DAILY_QUOTA_REACHED", "ACCOUNT_COOLDOWN"]:
+                alternate_userbots = [ub for ub in ready_userbots if ub.id != chosen_userbot.id]
                 if alternate_userbots:
                     logger.info(f"[🔄 Multi-Account Load Balance]: Failover to alternate userbot {alternate_userbots[0].phone}")
                     res = await dedicated_userbot_service.send_direct_message_for_channel(
@@ -627,8 +644,8 @@ class RetentionEngine:
             return {"success": False, "error": res.get("error_ar") or res.get("error")}
 
         elif res.get("can_retry", True):
-            # Temporary backoff delay
-            retry_seconds = res.get("retry_delay_seconds", 30)
+            # Temporary backoff delay (capped so alternate bots can retry without long delays)
+            retry_seconds = min(res.get("retry_delay_seconds", 30), 120)
             case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
             db.commit()
             logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
@@ -645,7 +662,7 @@ class RetentionEngine:
         pending_cases = db.query(RecoveryCase).filter(
             RecoveryCase.status == "SCHEDULED",
             RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(10).all()
+        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(35).all()
 
         if not pending_cases:
             return
@@ -653,10 +670,15 @@ class RetentionEngine:
         # Check count of active dedicated userbots to calculate dynamic safe pacing
         active_bots = db.query(ChannelUserbot).filter(
             ChannelUserbot.is_active == True,
-            ChannelUserbot.status == "CONNECTED"
+            (
+                (ChannelUserbot.status == "CONNECTED") |
+                ((ChannelUserbot.status == "FLOOD_WAIT") & (
+                    (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
+                ))
+            )
         ).count()
-        # With 1 bot: 15s. With 2+ bots: dynamic pacing 7.5s (each account still preserves 15s between its own sends)
-        pacing_delay = 15.0 if active_bots <= 1 else max(7.0, 15.0 / active_bots)
+        # With 1 bot: 20s. With 2+ bots: 15s delay between overall sends (each individual account gets 30s)
+        pacing_delay = 20.0 if active_bots <= 1 else max(12.0, 30.0 / active_bots)
 
         sent_count = 0
         failed_tenants = set()

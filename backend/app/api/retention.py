@@ -582,13 +582,26 @@ async def turbo_dispatch_pending_cases(
     if channel_id:
         query = query.filter(RecoveryCase.channel_id == channel_id)
 
-    cases = query.order_by(RecoveryCase.created_at.desc()).all()
     now = datetime.now(timezone.utc)
+
+    # Auto-heal dedicated userbots whose cooldown expired
+    expired_bots = db.query(ChannelUserbot).filter(
+        ChannelUserbot.tenant_id == tenant_id,
+        (
+            (ChannelUserbot.status == "FLOOD_WAIT") &
+            ((ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now))
+        )
+    ).all()
+    for eb in expired_bots:
+        eb.status = "CONNECTED"
+        eb.cooldown_until = None
+        eb.last_error = None
+
     for idx, c in enumerate(cases):
         c.status = "SCHEDULED"
         c.contactable = True
         c.uncontactable_reason = None
-        # Safe natural pacing: stagger each message by 15s (case 0 is now, case 1 is now+15s...)
+        # Safe natural pacing: stagger each message by 15s across 2 alternating bots (each bot gets 30s)
         c.scheduled_contact_at = now + timedelta(seconds=idx * 15)
 
     db.commit()

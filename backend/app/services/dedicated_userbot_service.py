@@ -384,8 +384,14 @@ class DedicatedUserbotService:
                     "can_retry": True,
                     "retry_delay_seconds": rem
                 }
+            else:
+                # Cooldown expired! Auto-restore status to CONNECTED
+                userbot.status = "CONNECTED"
+                userbot.cooldown_until = None
+                userbot.last_error = None
+                db.commit()
 
-        client = await self.get_client_for_channel(db, channel_id)
+        client = await self.get_client_for_channel(db, channel_id, userbot_id=userbot.id)
         if not client:
             return {
                 "success": False,
@@ -395,8 +401,9 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 300
             }
 
-        # Fast minimal anti-spam pacing (1.5 - 3.0s) for rapid outreach
-        last_sent = self._last_message_times.get(channel_id, 0.0)
+        # Fast minimal anti-spam pacing (1.5 - 3.0s) per userbot
+        bot_key = userbot.id or channel_id
+        last_sent = self._last_message_times.get(bot_key, 0.0)
         elapsed = time.time() - last_sent
         if elapsed < 2.0:
             await asyncio.sleep(random.uniform(1.5, 3.0))
@@ -424,7 +431,7 @@ class DedicatedUserbotService:
             userbot.daily_contacts_count += 1
             userbot.status = "CONNECTED"
             userbot.last_error = None
-            self._last_message_times[channel_id] = time.time()
+            self._last_message_times[bot_key] = time.time()
             db.commit()
 
             bot_display = userbot.username or userbot.first_name or f"Userbot_{userbot.phone}"

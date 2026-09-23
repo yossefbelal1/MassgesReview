@@ -174,10 +174,28 @@ async def retention_outreach_dispatcher():
         try:
             db: Session = SessionLocal()
 
+            # Auto-heal any dedicated userbots whose cooldown has expired
+            now_utc = datetime.now(timezone.utc)
+            expired_bots = db.query(ChannelUserbot).filter(
+                ChannelUserbot.status == "FLOOD_WAIT",
+                (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now_utc)
+            ).all()
+            if expired_bots:
+                for eb in expired_bots:
+                    eb.status = "CONNECTED"
+                    eb.cooldown_until = None
+                    eb.last_error = None
+                db.commit()
+
             # Circuit breaker: only back off if fallback pool is in cooldown AND no active dedicated userbots exist
             has_dedicated_bots = db.query(ChannelUserbot).filter(
                 ChannelUserbot.is_active == True,
-                ChannelUserbot.status == "CONNECTED"
+                (
+                    (ChannelUserbot.status == "CONNECTED") |
+                    ((ChannelUserbot.status == "FLOOD_WAIT") & (
+                        (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now_utc)
+                    ))
+                )
             ).first() is not None
 
             all_fallback_in_cooldown = len(userbot_pool.sessions) > 0 and all(
@@ -195,14 +213,14 @@ async def retention_outreach_dispatcher():
                 continue
 
             # Reset backoff when sessions are available
-            backoff_seconds = 10.0
+            backoff_seconds = 5.0
 
             await retention_engine.process_pending_recovery_contacts(db)
             db.close()
         except Exception as loop_err:
             print(f"[!] Outreach dispatcher error: {loop_err}", flush=True)
 
-        await asyncio.sleep(10.0)
+        await asyncio.sleep(5.0)
 
 async def worker_job_executor():
     """
