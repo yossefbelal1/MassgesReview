@@ -3,9 +3,15 @@ import sys
 import time
 import uuid
 import asyncio
+import logging
 from datetime import datetime, timezone
 from telethon import TelegramClient, events
 from sqlalchemy.orm import Session
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal
