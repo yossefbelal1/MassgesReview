@@ -209,8 +209,11 @@ class DedicatedUserbotService:
             except Exception:
                 pass
 
-        # 4. Upsert into channel_userbots
-        userbot = db.query(ChannelUserbot).filter(ChannelUserbot.channel_id == attempt.channel_id).first()
+        # 4. Upsert into channel_userbots by tenant_id and phone
+        userbot = db.query(ChannelUserbot).filter(
+            ChannelUserbot.tenant_id == tenant_id,
+            ChannelUserbot.phone == attempt.phone
+        ).first()
         if not userbot:
             userbot = ChannelUserbot(
                 tenant_id=tenant_id,
@@ -228,6 +231,7 @@ class DedicatedUserbotService:
             )
             db.add(userbot)
         else:
+            userbot.channel_id = attempt.channel_id
             userbot.api_id = attempt.api_id
             userbot.api_hash = attempt.api_hash
             userbot.phone = attempt.phone
@@ -245,14 +249,15 @@ class DedicatedUserbotService:
         db.refresh(userbot)
 
         # Clear any cached client
-        if attempt.channel_id in self._clients:
+        cache_key = userbot.id
+        if cache_key in self._clients:
             try:
-                await self._clients[attempt.channel_id].disconnect()
+                await self._clients[cache_key].disconnect()
             except Exception:
                 pass
-            del self._clients[attempt.channel_id]
+            del self._clients[cache_key]
 
-        logger.info(f"[✓] Dedicated userbot @{tg_username or tg_user_id} linked to channel {attempt.channel_id} successfully.")
+        logger.info(f"[✓] Dedicated userbot @{tg_username or tg_user_id} ({userbot.phone}) linked to channel {attempt.channel_id} successfully.")
 
         return {
             "success": True,
@@ -262,16 +267,18 @@ class DedicatedUserbotService:
                 "telegram_user_id": tg_user_id,
                 "username": tg_username,
                 "first_name": tg_first_name,
-                "phone": userbot.phone
+                "phone": userbot.phone,
+                "channel_id": userbot.channel_id
             }
         }
 
-    async def get_client_for_channel(self, db: Session, channel_id: str) -> Optional[TelegramClient]:
+    async def get_client_for_channel(self, db: Session, channel_id: str, userbot_id: Optional[str] = None) -> Optional[TelegramClient]:
         """
         Retrieves or instantiates an active, authenticated TelegramClient for the channel's userbot.
         """
-        if channel_id in self._clients:
-            client = self._clients[channel_id]
+        cache_key = userbot_id or channel_id
+        if cache_key in self._clients:
+            client = self._clients[cache_key]
             if client.is_connected():
                 return client
             try:
@@ -280,10 +287,16 @@ class DedicatedUserbotService:
             except Exception:
                 pass
 
-        userbot = db.query(ChannelUserbot).filter(
-            ChannelUserbot.channel_id == channel_id,
-            ChannelUserbot.is_active == True
-        ).first()
+        if userbot_id:
+            userbot = db.query(ChannelUserbot).filter(
+                ChannelUserbot.id == userbot_id,
+                ChannelUserbot.is_active == True
+            ).first()
+        else:
+            userbot = db.query(ChannelUserbot).filter(
+                ChannelUserbot.channel_id == channel_id,
+                ChannelUserbot.is_active == True
+            ).first()
 
         if not userbot or not userbot.string_session:
             return None
@@ -309,12 +322,13 @@ class DedicatedUserbotService:
                 db.commit()
                 return None
 
-            self._clients[channel_id] = client
+            self._clients[cache_key] = client
+            self._clients[userbot.id] = client
             return client
         except Exception as e:
             userbot.last_error = str(e)
             db.commit()
-            logger.error(f"Error connecting dedicated userbot for channel {channel_id}: {e}")
+            logger.error(f"Error connecting dedicated userbot {userbot.id} for channel {channel_id}: {e}")
             return None
 
     async def send_direct_message_for_channel(
@@ -324,15 +338,17 @@ class DedicatedUserbotService:
         target_user_id: int,
         text: str,
         target_username: Optional[str] = None,
-        access_hash: Optional[int] = None
+        access_hash: Optional[int] = None,
+        userbot_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Sends cold recovery message via channel's dedicated userbot with quota safety and pacing.
         """
-        userbot = db.query(ChannelUserbot).filter(
-            ChannelUserbot.channel_id == channel_id,
-            ChannelUserbot.is_active == True
-        ).first()
+        query = db.query(ChannelUserbot).filter(ChannelUserbot.is_active == True)
+        if userbot_id:
+            userbot = query.filter(ChannelUserbot.id == userbot_id).first()
+        else:
+            userbot = query.filter(ChannelUserbot.channel_id == channel_id).first()
 
         if not userbot:
             return {"success": False, "error": "NO_DEDICATED_USERBOT", "can_retry": False}

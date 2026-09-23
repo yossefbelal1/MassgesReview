@@ -358,7 +358,7 @@ class ChannelUserbot(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), unique=True, nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
     api_id = Column(Integer, nullable=False)
     api_hash = Column(String(64), nullable=False)
     phone = Column(String(32), nullable=False)
@@ -377,7 +377,7 @@ class ChannelUserbot(Base):
 
     __table_args__ = (
         Index("idx_channel_userbot_tenant_chan", "tenant_id", "channel_id"),
-        UniqueConstraint("channel_id", name="uq_channel_userbot_channel"),
+        UniqueConstraint("tenant_id", "phone", name="uq_channel_userbot_phone"),
     )
 
     tenant = relationship("Tenant", back_populates="channel_userbots")

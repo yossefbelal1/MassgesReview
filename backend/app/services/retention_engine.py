@@ -562,7 +562,8 @@ class RetentionEngine:
                 target_user_id=int(case.telegram_user_id),
                 text=outbound_text,
                 target_username=username,
-                access_hash=access_hash
+                access_hash=access_hash,
+                userbot_id=chosen_userbot.id
             )
             if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD", "DAILY_QUOTA_REACHED"]:
                 alternate_userbots = [ub for ub in ready_userbots if ub != chosen_userbot]
@@ -574,7 +575,8 @@ class RetentionEngine:
                         target_user_id=int(case.telegram_user_id),
                         text=outbound_text,
                         target_username=username,
-                        access_hash=access_hash
+                        access_hash=access_hash,
+                        userbot_id=alternate_userbots[0].id
                     )
                 else:
                     logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
