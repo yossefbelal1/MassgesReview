@@ -86,6 +86,55 @@ class RetentionEngine:
     Audience Retention, Leave Detection, and Conversational Win-back Engine.
     """
 
+    async def get_admin_client_for_channel(self, channel: Channel, default_client: TelegramClient) -> TelegramClient:
+        """
+        Finds a client that has admin rights to view the admin log of this channel.
+        Checks default client first, then dedicated channel userbot, then all pool sessions.
+        """
+        target = channel.username.strip().lstrip('@') if channel.username else int(channel.telegram_chat_id)
+
+        # 1. First test default_client
+        try:
+            ent = await default_client.get_entity(target)
+            if getattr(ent, 'admin_rights', None) is not None:
+                return default_client
+        except Exception:
+            pass
+
+        # 2. Check dedicated userbot for this channel
+        db = SessionLocal()
+        try:
+            dedicated = db.query(ChannelUserbot).filter(
+                ChannelUserbot.channel_id == channel.id,
+                ChannelUserbot.is_active == True
+            ).first()
+            if dedicated and dedicated.string_session:
+                try:
+                    d_client = await dedicated_userbot_service.get_client_for_channel(channel.id, dedicated.string_session)
+                    if d_client and d_client.is_connected():
+                        ent = await d_client.get_entity(target)
+                        if getattr(ent, 'admin_rights', None) is not None:
+                            logger.info(f"[🔑 Admin Client]: Using dedicated userbot for '{channel.title}' admin log.")
+                            return d_client
+                except Exception:
+                    pass
+        finally:
+            db.close()
+
+        # 3. Check all userbot pool sessions
+        for s in userbot_pool.sessions:
+            try:
+                cl = await s.get_client()
+                if cl and cl != default_client:
+                    ent = await cl.get_entity(target)
+                    if getattr(ent, 'admin_rights', None) is not None:
+                        logger.info(f"[🔑 Admin Client]: Using session '{s.name}' for channel '{channel.title}' admin log.")
+                        return cl
+            except Exception:
+                continue
+
+        return default_client
+
     async def sync_channel_admin_log(self, db: Session, channel: Channel, client: TelegramClient) -> int:
         """
         Polls channel Admin Log (Recent Actions) for member leaves and joins.
@@ -111,28 +160,53 @@ class RetentionEngine:
         if not settings.is_retention_enabled:
             return 0
 
-        chat_peer = int(channel.telegram_chat_id)
-        try:
-            entity = await client.get_entity(chat_peer)
-        except Exception as e:
-            logger.debug(f"Could not resolve entity for channel {channel.title}: {e}")
-            return 0
+        # Ensure we have an admin client capable of reading the admin log
+        active_client = await self.get_admin_client_for_channel(channel, client)
+
+        # Resolve entity safely
+        entity = None
+        if channel.username:
+            try:
+                entity = await active_client.get_entity(channel.username.strip().lstrip('@'))
+            except Exception:
+                pass
+        if not entity:
+            try:
+                entity = await active_client.get_entity(int(channel.telegram_chat_id))
+            except Exception as e:
+                logger.warning(f"Could not resolve entity for channel {channel.title}: {e}")
+                return 0
 
         last_id = int(channel.last_seen_admin_log_id or 0)
         events_processed = 0
 
         try:
-            # Fetch recent admin log events for joins, leaves, and invites
-            log_events = await client.get_admin_log(
-                entity,
-                join=True,
-                leave=True,
-                invite=True,
-                limit=30,
-                min_id=last_id
-            )
+            # Paginate backwards from newest to last_id in chunks of 100 (up to 500 events max per sync cycle)
+            log_events = []
+            curr_max_id = 0
+            for _ in range(5):
+                kwargs = {
+                    "join": True,
+                    "leave": True,
+                    "invite": True,
+                    "limit": 100,
+                    "min_id": last_id
+                }
+                if curr_max_id > 0:
+                    kwargs["max_id"] = curr_max_id
+
+                chunk = await active_client.get_admin_log(entity, **kwargs)
+                if not chunk:
+                    break
+                log_events.extend(chunk)
+                if len(chunk) < 100:
+                    break
+                curr_max_id = min(int(ev.id) for ev in chunk)
 
             if not log_events:
+                channel.last_admin_log_sync_at = datetime.now(timezone.utc)
+                channel.sync_status = "ACTIVE"
+                db.commit()
                 return 0
 
             max_seen_id = last_id
@@ -149,21 +223,31 @@ class RetentionEngine:
                 user_id = str(ev.user_id)
                 event_date = ev.date.replace(tzinfo=timezone.utc) if ev.date.tzinfo is None else ev.date
 
-                # Fetch member entity details
+                # Extract member entity details from the admin log event itself
                 first_name, last_name, username, access_hash = None, None, None, None
                 try:
-                    user_entity = await client.get_entity(ev.user_id)
-                    first_name = getattr(user_entity, 'first_name', None)
-                    last_name = getattr(user_entity, 'last_name', None)
-                    username = getattr(user_entity, 'username', None)
-                    raw_hash = getattr(user_entity, 'access_hash', None)
-                    if raw_hash is not None:
-                        access_hash = str(raw_hash)
+                    user_entity = getattr(ev, 'user', None)
+                    if not user_entity and hasattr(ev, 'entities') and ev.user_id in ev.entities:
+                        user_entity = ev.entities[ev.user_id]
+                    if not user_entity and hasattr(ev, '_entities') and ev.user_id in ev._entities:
+                        user_entity = ev._entities[ev.user_id]
+                    if not user_entity:
+                        try:
+                            user_entity = await active_client.get_entity(ev.user_id)
+                        except Exception:
+                            pass
+                    if user_entity:
+                        first_name = getattr(user_entity, 'first_name', None)
+                        last_name = getattr(user_entity, 'last_name', None)
+                        username = getattr(user_entity, 'username', None)
+                        raw_hash = getattr(user_entity, 'access_hash', None)
+                        if raw_hash is not None:
+                            access_hash = str(raw_hash)
                 except Exception:
                     pass
 
                 # ── Handle LEAVE ─────────────────────────────────────────────
-                if isinstance(ev.action, ChannelAdminLogEventActionParticipantLeave):
+                if isinstance(ev.action, ChannelAdminLogEventActionParticipantLeave) or getattr(ev, 'left', False):
                     events_processed += 1
                     await self._handle_member_leave(
                         db=db,
@@ -183,7 +267,7 @@ class RetentionEngine:
                     ChannelAdminLogEventActionParticipantJoin,
                     ChannelAdminLogEventActionParticipantJoinByInvite,
                     ChannelAdminLogEventActionParticipantJoinByRequest
-                )):
+                )) or getattr(ev, 'joined', False) or getattr(ev, 'joined_by_invite', False):
                     events_processed += 1
                     await self._handle_member_join(
                         db=db,
@@ -282,18 +366,10 @@ class RetentionEngine:
             logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
             return
 
-        # Schedule recovery contact immediately (zero delay as requested)
+        # Schedule recovery contact immediately (zero delay as commanded by user)
         now = datetime.now(timezone.utc)
-
-        # Check if leave happened in the distant past (e.g. historical admin log read > 48h)
-        is_historical = (now - event_date).total_seconds() > (48 * 3600)
-
-        if is_historical:
-            initial_status = "DETECTED"
-            scheduled_at = None
-        else:
-            initial_status = "SCHEDULED"
-            scheduled_at = now
+        initial_status = "SCHEDULED"
+        scheduled_at = now
 
         case = RecoveryCase(
             tenant_id=channel.tenant_id,
@@ -309,13 +385,6 @@ class RetentionEngine:
         db.add(case)
         db.commit()
         logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
-
-        # Immediately trigger outreach dispatch without waiting
-        if initial_status == "SCHEDULED":
-            try:
-                asyncio.create_task(self.process_pending_recovery_contacts(db))
-            except Exception as e:
-                logger.warning(f"Could not spawn immediate outreach task: {e}")
 
     async def _handle_member_join(
         self,
@@ -556,7 +625,7 @@ class RetentionEngine:
     async def process_pending_recovery_contacts(self, db: Session):
         """
         Executes scheduled initial recovery contacts with strict safe pacing (15 seconds between contacts).
-        Processes batches of due cases with intelligent inter-message delays.
+        Has circuit breaker: stops immediately on PeerFlood to avoid worsening the ban.
         """
         now = datetime.now(timezone.utc)
         pending_cases = db.query(RecoveryCase).filter(
@@ -567,13 +636,20 @@ class RetentionEngine:
         if not pending_cases:
             return
 
+        sent_count = 0
         for case in pending_cases:
             res = await self.send_recovery_to_case(db, case)
-            if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED"]:
-                logger.info(f"[⚠️ Outreach Paused]: All sessions in cooldown ({res.get('error')}). Halting current batch.")
+            if res.get("success"):
+                sent_count += 1
+            elif res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD"]:
+                # Circuit breaker: stop batch immediately, don't make things worse
+                logger.info(f"[⚠️ Outreach Paused]: {res.get('error')} — stopping batch to avoid amplifying ban.")
                 break
             # Strict human anti-spam pacing of 15 seconds as commanded
             await asyncio.sleep(15.0)
+
+        if sent_count > 0:
+            logger.info(f"[📊 Outreach Batch]: Sent {sent_count}/{len(pending_cases)} recovery messages this cycle.")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

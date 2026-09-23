@@ -111,12 +111,13 @@ async def active_channel_watcher():
 async def retention_channel_watcher():
     """
     Monitors channel Recent Actions (Admin Log) for member leaves and joins.
-    Triggers retention cases and processes pending initial contacts.
+    ONLY syncs admin log — does NOT send messages. Runs independently every 5s.
     """
     global CHANNEL_ENTITIES, RUNNING
 
     # Give primary connection time to settle
     await asyncio.sleep(5.0)
+    poll_count = 0
 
     while RUNNING:
         try:
@@ -124,26 +125,73 @@ async def retention_channel_watcher():
             db: Session = SessionLocal()
 
             channels = db.query(Channel).filter(Channel.is_connected == True).all()
+            total_events = 0
             for ch in channels:
                 if not ch.tenant or not ch.tenant.is_active:
                     continue
                 try:
                     events_count = await retention_engine.sync_channel_admin_log(db, ch, client)
+                    total_events += events_count
                     if events_count > 0:
                         print(f"[🎯 Retention Watcher]: Processed {events_count} join/leave events for '{ch.title}'", flush=True)
                 except Exception as sync_err:
                     print(f"[!] Retention sync error for channel '{ch.title}': {sync_err}", flush=True)
 
-            # Also trigger due scheduled initial recovery contacts
-            await retention_engine.process_pending_recovery_contacts(db)
             db.close()
+
+            # Log heartbeat every 60 polls (~5 minutes) even when no events
+            poll_count += 1
+            if poll_count % 60 == 0:
+                print(f"[🔄 Retention Watcher Heartbeat]: Poll #{poll_count}, channels={len(channels)}, last cycle events={total_events}", flush=True)
+
         except Exception as loop_err:
             err_str = str(loop_err).lower()
             print(f"[!] Retention watcher loop error: {loop_err}", flush=True)
             if "disconnected" in err_str or "connection" in err_str:
                 await telegram_service.ensure_connected()
 
-        await asyncio.sleep(3.0)
+        await asyncio.sleep(5.0)
+
+
+async def retention_outreach_dispatcher():
+    """
+    Separate coroutine that processes pending recovery contacts.
+    Runs independently from admin log sync to never block leave detection.
+    Has circuit breaker: backs off when all accounts have PeerFlood.
+    """
+    global RUNNING
+
+    await asyncio.sleep(8.0)  # Let watcher populate cases first
+    backoff_seconds = 10.0  # Normal polling interval
+
+    while RUNNING:
+        try:
+            db: Session = SessionLocal()
+
+            # Circuit breaker: check if ALL sessions are in cooldown before trying
+            all_in_cooldown = all(
+                time.time() < s.cooldown_until for s in userbot_pool.sessions
+            )
+            if all_in_cooldown:
+                cooldowns = [s.cooldown_until - time.time() for s in userbot_pool.sessions]
+                wait_remaining = int(max(cooldowns)) if cooldowns else 60
+                if backoff_seconds < 300:  # Max 5 min backoff
+                    backoff_seconds = min(backoff_seconds * 2, 300)
+                print(f"[⏸️ Outreach Circuit Breaker]: All sessions in PeerFlood cooldown. "
+                      f"Next check in {int(backoff_seconds)}s. Cooldown remaining: {wait_remaining}s", flush=True)
+                db.close()
+                await asyncio.sleep(backoff_seconds)
+                continue
+
+            # Reset backoff when sessions are available
+            backoff_seconds = 10.0
+
+            await retention_engine.process_pending_recovery_contacts(db)
+            db.close()
+        except Exception as loop_err:
+            print(f"[!] Outreach dispatcher error: {loop_err}", flush=True)
+
+        await asyncio.sleep(10.0)
 
 async def worker_job_executor():
     """
@@ -234,6 +282,7 @@ async def main():
     await asyncio.gather(
         active_channel_watcher(),
         retention_channel_watcher(),
+        retention_outreach_dispatcher(),
         worker_job_executor(),
         keepalive_ping()
     )

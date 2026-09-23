@@ -257,6 +257,7 @@ class UserbotPool:
             logger.warning(f"[⚠️ PeerFlood Triggered]: Session {session.name} received PeerFloodError.")
             session.cooldown_until = time.time() + 900
             session.last_error = "PeerFloodError"
+            session.is_healthy = False
 
             # Failover to secondary session if healthy
             alternate = [s for s in self.sessions if s != session and s.is_healthy and time.time() >= s.cooldown_until]

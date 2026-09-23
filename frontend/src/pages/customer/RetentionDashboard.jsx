@@ -120,8 +120,13 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
   }, []);
 
   useEffect(() => {
-    fetchData();
-  }, [selectedChannelId, activeTab]);
+    fetchData(false);
+    // Real-time live polling every 7 seconds
+    const interval = setInterval(() => {
+      fetchData(true);
+    }, 7000);
+    return () => clearInterval(interval);
+  }, [selectedChannelId, activeTab, statusFilter]);
 
   const fetchChannels = async () => {
     try {
@@ -135,9 +140,9 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     }
   };
 
-  const fetchData = async () => {
+  const fetchData = async (isBackground = false) => {
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       const chParam = selectedChannelId ? `?channel_id=${selectedChannelId}` : '';
 
       // 1. Summary KPIs
@@ -163,7 +168,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       } else if (activeTab === 'members') {
         const memRes = await apiClient.get(`/retention/members${chParam}`);
         setMembers(memRes.data);
-      } else if (activeTab === 'settings' && selectedChannelId) {
+      } else if (activeTab === 'settings' && selectedChannelId && !isBackground) {
         const setRes = await apiClient.get(`/retention/settings/${selectedChannelId}`);
         setSettings(setRes.data);
         const sSec = (setRes.data.initial_delay_seconds !== undefined && setRes.data.initial_delay_seconds !== null) ? setRes.data.initial_delay_seconds : 5;
@@ -185,7 +190,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     } catch (err) {
       console.error('Error fetching retention data:', err);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   };
 
@@ -544,29 +549,44 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
+        <div className="flex items-center gap-3">
           <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
             <UserCheck className="w-5 h-5 text-emerald-400" />
             <span>استرداد الأعضاء</span>
           </h1>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            مباشر ولحظي
+          </span>
         </div>
 
-        {/* Channel Selector */}
-        {channels.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 hidden sm:inline">القناة:</span>
-            <select
-              value={selectedChannelId}
-              onChange={(e) => setSelectedChannelId(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 min-h-[38px]"
-            >
-              <option value="">جميع القنوات</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>{ch.title}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        {/* Channel Selector & Refresh */}
+        <div className="flex items-center gap-2">
+          {channels.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 hidden sm:inline">القناة:</span>
+              <select
+                value={selectedChannelId}
+                onChange={(e) => setSelectedChannelId(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 min-h-[38px]"
+              >
+                <option value="">جميع القنوات</option>
+                {channels.map((ch) => (
+                  <option key={ch.id} value={ch.id}>{ch.title}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <button
+            onClick={() => fetchData(false)}
+            disabled={loading}
+            title="تحديث البيانات فوراً"
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all min-h-[38px]"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+            <span className="hidden sm:inline">تحديث</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Metrics */}
