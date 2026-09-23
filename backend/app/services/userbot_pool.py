@@ -76,11 +76,15 @@ class UserbotPool:
     """
     def __init__(self):
         self.sessions: List[UserbotSession] = [
-            UserbotSession("primary", telegram_service.ensure_connected, max_daily_contacts=35)
+            UserbotSession("primary", telegram_service.ensure_connected, max_daily_contacts=100)
         ]
         if getattr(settings, 'TELEGRAM_BACKUP_STRING_SESSION', None) and str(settings.TELEGRAM_BACKUP_STRING_SESSION).strip():
             self.sessions.append(
-                UserbotSession("backup", telegram_service.get_backup_client, max_daily_contacts=30)
+                UserbotSession("backup", telegram_service.get_backup_client, max_daily_contacts=100)
+            )
+        if getattr(settings, 'TELEGRAM_TERTIARY_STRING_SESSION', None) and str(settings.TELEGRAM_TERTIARY_STRING_SESSION).strip():
+            self.sessions.append(
+                UserbotSession("tertiary", telegram_service.get_tertiary_client, max_daily_contacts=100)
             )
         self._inbound_handlers: List[Callable[[Any, TelegramClient, str], Any]] = []
         self._listeners_registered = False
@@ -229,23 +233,13 @@ class UserbotPool:
                 "error": None
             }
 
-        except UserPrivacyRestrictedError:
+        except (UserPrivacyRestrictedError, UserNotMutualContactError):
             logger.info(f"[🛡️ Privacy Restricted]: User {target_user_id} does not allow DMs from non-contacts.")
             return {
                 "success": False,
                 "error": "USER_PRIVACY_RESTRICTED",
                 "error_ar": "إعدادات خصوصية هذا المستخدم تمنع استقبال الرسائل من غير جهات الاتصال لديه.",
                 "uncontactable_reason": "PRIVACY_RESTRICTED",
-                "can_retry": False
-            }
-
-        except UserNotMutualContactError:
-            logger.info(f"[🛡️ Not Mutual Contact]: User {target_user_id} requires mutual contact.")
-            return {
-                "success": False,
-                "error": "NOT_MUTUAL_CONTACT",
-                "error_ar": "المستخدم يشترط أن تكون جهة اتصال متبادلة لمراسلته.",
-                "uncontactable_reason": "NOT_MUTUAL_CONTACT",
                 "can_retry": False
             }
 
@@ -296,14 +290,56 @@ class UserbotPool:
                 "retry_delay_seconds": wait_time
             }
 
+        except RPCError as rpc_err:
+            err_msg = str(rpc_err).upper()
+            logger.warning(f"[⚠️ RPC Error for user {target_user_id}]: {rpc_err}")
+            # Detect uncontactable privacy/permission errors
+            if any(term in err_msg for term in ["PRIVACY_PREMIUM_REQUIRED", "PRIVACY_RESTRICTED", "USER_PRIVACY", "CHAT_WRITE_FORBIDDEN", "PEER_ID_INVALID", "USER_BANNED"]):
+                return {
+                    "success": False,
+                    "error": "PRIVACY_RESTRICTED",
+                    "error_ar": "إعدادات خصوصية هذا المستخدم تمنع استقبال الرسائل (مشتركين Premium فقط أو جهات اتصال).",
+                    "uncontactable_reason": "PRIVACY_RESTRICTED",
+                    "can_retry": False
+                }
+            if "PEER_FLOOD" in err_msg:
+                session.cooldown_until = time.time() + 900
+                session.last_error = "PeerFloodError"
+                alternate = [s for s in self.sessions if s != session and s.is_healthy and time.time() >= s.cooldown_until]
+                if alternate:
+                    return await self.send_direct_message(target_user_id, text, channel_id, preferred_session=alternate[0].name, target_username=target_username, access_hash=access_hash)
+                return {
+                    "success": False,
+                    "error": "PEER_FLOOD",
+                    "error_ar": "حساب المجمع مقيد مؤقتاً من مراسلة الغرباء.",
+                    "can_retry": True,
+                    "retry_delay_seconds": 900
+                }
+            return {
+                "success": False,
+                "error": str(rpc_err),
+                "error_ar": f"خطأ تيليجرام: {str(rpc_err)}",
+                "can_retry": False,
+                "uncontactable_reason": "RPC_ERROR"
+            }
+
         except Exception as err:
+            err_msg = str(err).upper()
             logger.error(f"[!] Error sending direct message to {target_user_id}: {err}", exc_info=True)
+            if any(term in err_msg for term in ["PRIVACY_PREMIUM_REQUIRED", "PRIVACY_RESTRICTED", "USER_PRIVACY"]):
+                return {
+                    "success": False,
+                    "error": "PRIVACY_RESTRICTED",
+                    "error_ar": "إعدادات خصوصية هذا المستخدم تمنع استقبال الرسائل من غير المشتركين.",
+                    "uncontactable_reason": "PRIVACY_RESTRICTED",
+                    "can_retry": False
+                }
             return {
                 "success": False,
                 "error": str(err),
                 "error_ar": f"خطأ أثناء الإرسال: {str(err)}",
-                "can_retry": True,
-                "retry_delay_seconds": 300
+                "can_retry": False,
+                "uncontactable_reason": "ERROR"
             }
 
     async def get_userbot_avatar(self, session_name: str = "primary") -> Optional[bytes]:

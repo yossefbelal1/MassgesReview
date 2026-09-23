@@ -30,6 +30,7 @@ class Settings(BaseModel):
     TELEGRAM_BACKUP_STRING_SESSION: str = os.getenv("TELEGRAM_BACKUP_STRING_SESSION", "")
     TELEGRAM_BACKUP_PHONE: str = os.getenv("TELEGRAM_BACKUP_PHONE", "")
     TELEGRAM_BACKUP_NAME: str = os.getenv("TELEGRAM_BACKUP_NAME", "Dala")
+    TELEGRAM_TERTIARY_STRING_SESSION: str = os.getenv("TELEGRAM_TERTIARY_STRING_SESSION", "")
     
     # Redis Queue & Caching
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")

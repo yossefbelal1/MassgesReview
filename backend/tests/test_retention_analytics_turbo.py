@@ -169,8 +169,8 @@ def test_turbo_dispatch_staggers_scheduled_cases(client: TestClient, db: Session
     t1 = updated_cases[1].scheduled_contact_at
     t2 = updated_cases[2].scheduled_contact_at
     
-    # Delta should be roughly 25 seconds between each
+    # Delta should be roughly 15 seconds between each
     diff_1_0 = (t1 - t0).total_seconds()
     diff_2_1 = (t2 - t1).total_seconds()
-    assert 24 <= diff_1_0 <= 26
-    assert 24 <= diff_2_1 <= 26
+    assert 14 <= diff_1_0 <= 16
+    assert 14 <= diff_2_1 <= 16

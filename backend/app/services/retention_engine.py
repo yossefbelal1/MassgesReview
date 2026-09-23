@@ -398,22 +398,34 @@ class RetentionEngine:
     def build_recovery_outbound_text(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> str:
         """Builds customized recovery text with placeholders substituted."""
         first_name = case.member.first_name if case.member else "يا غالي"
-        default_template = (
-            "مرحباً {name}، لاحظنا مغادرتك لقناة {channel} وحبينا نتطمن عليك 🌹\n"
-            "هل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.\n\n"
-            "{invite_link}"
-        )
-        template = settings.recovery_first_message_template if (settings and settings.recovery_first_message_template) else default_template
+        ch_title = channel.title if channel else ""
+        name = first_name or "يا غالي"
         invite_url = settings.invite_link if (settings and settings.invite_link) else ""
 
+        default_variations = [
+            f"مرحباً {name}، لاحظنا مغادرتك لقناة {ch_title} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.",
+            f"أهلاً بك أخي {name}، نتمنى أن تكون بأحسن حال 🌸\nلاحظنا خروجك من قناة {ch_title}، ويهمنا جداً معرفة رأيك إذا كان هناك ما يمكننا تحسينه.",
+            f"السلام عليكم أخي {name}، افتقدناك في {ch_title} 💐\nهل غادرت القناة بالخطأ أم واجهتك مشكلة في المحتوى؟ رأيك وملاحظاتك تهمنا كثيراً.",
+            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة أو أمر واجهك لتطوير القناة."
+        ]
+
+        # Use natural randomized variation for default template to protect accounts from identical message limits
+        if not settings or not settings.recovery_first_message_template or "مرحباً {name}، لاحظنا مغادرتك" in settings.recovery_first_message_template:
+            user_seed = int(case.telegram_user_id) if str(case.telegram_user_id).isdigit() else 0
+            pick_idx = user_seed % len(default_variations)
+            base_text = default_variations[pick_idx]
+            if invite_url:
+                base_text = f"{base_text}\n\n{invite_url}"
+            return base_text
+
+        template = settings.recovery_first_message_template
         if invite_url:
             if "{invite_link}" in template:
                 template = template.replace("{invite_link}", invite_url)
             else:
                 template = f"{template.rstrip()}\n\n{invite_url}"
 
-        ch_title = channel.title if channel else ""
-        return template.replace("{name}", first_name or "يا غالي")\
+        return template.replace("{name}", name)\
                        .replace("{channel}", ch_title)\
                        .replace("{invite_link}", invite_url or "")
 
@@ -522,13 +534,13 @@ class RetentionEngine:
             logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
             return {"success": True, "userbot": res["userbot_username"], "message": "تم إرسال رسالة الاسترداد بنجاح! ⚡"}
 
-        elif res.get("uncontactable_reason") and not res.get("can_retry", True):
-            # Permanent Telegram user privacy restriction or deleted account
+        elif res.get("uncontactable_reason") or not res.get("can_retry", True):
+            # Permanent Telegram user privacy restriction, Premium required, or deleted account
             case.status = "UNCONTACTABLE"
             case.contactable = False
-            case.uncontactable_reason = res["uncontactable_reason"]
+            case.uncontactable_reason = res.get("uncontactable_reason") or "PRIVACY_RESTRICTED"
             db.commit()
-            logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({res['uncontactable_reason']})")
+            logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({case.uncontactable_reason})")
             return {"success": False, "error": res.get("error_ar") or res.get("error")}
 
         elif res.get("can_retry", True):
@@ -543,25 +555,25 @@ class RetentionEngine:
 
     async def process_pending_recovery_contacts(self, db: Session):
         """
-        Executes scheduled initial recovery contacts with safe natural pacing.
+        Executes scheduled initial recovery contacts with strict safe pacing (15 seconds between contacts).
         Processes batches of due cases with intelligent inter-message delays.
         """
         now = datetime.now(timezone.utc)
         pending_cases = db.query(RecoveryCase).filter(
             RecoveryCase.status == "SCHEDULED",
             RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(5).all()
+        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(10).all()
 
         if not pending_cases:
             return
 
         for case in pending_cases:
             res = await self.send_recovery_to_case(db, case)
-            if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "PEER_FLOOD", "CLIENT_DISCONNECTED"]:
-                logger.info(f"[⚠️ Outreach Paused]: Session cooldown active ({res.get('error')}). Halting current batch.")
+            if not res.get("success") and res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED"]:
+                logger.info(f"[⚠️ Outreach Paused]: All sessions in cooldown ({res.get('error')}). Halting current batch.")
                 break
-            # Natural anti-spam pacing between multiple sends in the same batch
-            await asyncio.sleep(random.uniform(4.0, 7.0))
+            # Strict human anti-spam pacing of 15 seconds as commanded
+            await asyncio.sleep(15.0)
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """

@@ -17,11 +17,15 @@ class TelegramService:
         self.session_str = settings.TELEGRAM_STRING_SESSION
         self._client: Optional[TelegramClient] = None
 
-        # Backup / Failover account (Dala)
-        self.backup_api_id = settings.TELEGRAM_BACKUP_API_ID
-        self.backup_api_hash = settings.TELEGRAM_BACKUP_API_HASH
+        # Backup / Failover account
+        self.backup_api_id = settings.TELEGRAM_BACKUP_API_ID if settings.TELEGRAM_BACKUP_API_ID != 0 else self.api_id
+        self.backup_api_hash = settings.TELEGRAM_BACKUP_API_HASH if settings.TELEGRAM_BACKUP_API_HASH else self.api_hash
         self.backup_session_str = settings.TELEGRAM_BACKUP_STRING_SESSION
         self._backup_client: Optional[TelegramClient] = None
+
+        # Tertiary account (standby / reply listener)
+        self.tertiary_session_str = getattr(settings, 'TELEGRAM_TERTIARY_STRING_SESSION', "")
+        self._tertiary_client: Optional[TelegramClient] = None
 
     async def get_client(self) -> TelegramClient:
         """Returns the primary Telegram client (@AutoMassge1)."""
@@ -84,6 +88,33 @@ class TelegramService:
             )
             await self._backup_client.connect()
         return self._backup_client
+
+    async def get_tertiary_client(self) -> Optional[TelegramClient]:
+        """Returns the tertiary/standby Telegram client."""
+        if not self.tertiary_session_str:
+            return None
+        if self._tertiary_client is None or not self._tertiary_client.is_connected():
+            if self._tertiary_client is not None:
+                try:
+                    await self._tertiary_client.disconnect()
+                except Exception:
+                    pass
+            session = StringSession(self.tertiary_session_str)
+            self._tertiary_client = TelegramClient(
+                session,
+                self.api_id,
+                self.api_hash,
+                device_model='Desktop PC',
+                system_version='Windows 10',
+                app_version='4.16.8 x64',
+                lang_code='ar',
+                system_lang_code='ar',
+                auto_reconnect=True,
+                connection_retries=None,
+                retry_delay=1
+            )
+            await self._tertiary_client.connect()
+        return self._tertiary_client
 
     async def ensure_connected(self) -> TelegramClient:
         """Guarantees the primary client is connected."""

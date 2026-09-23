@@ -720,10 +720,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                 onClick={handleSendAllPendingNow}
                 disabled={bulkSending}
                 className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
-                title="بدء إرسال رسائل الاسترداد للحالات المعلقة في الطابور"
+                title="بدء إرسال رسائل الاسترداد لجميع الحالات المعلقة بفاصل 15 ثانية"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>{bulkSending ? 'جاري الإرسال...' : 'إرسال الحالات المعلقة'}</span>
+                <span>{bulkSending ? 'جاري الإرسال (فاصل 15 ثانية)...' : '⚡ إرسال فوري لجميع المغادرين (فاصل 15 ثانية)'}</span>
               </button>
 
               <button
@@ -881,56 +881,82 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       {/* ── TAB 2: FEEDBACK & CHURN ANALYTICS ──────────────────────────────── */}
       {activeTab === 'analytics' && (
         <div className="space-y-4">
-          {/* Section 1: Conversion Funnel */}
-          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+          {/* Section 1: Clean Focused Overview */}
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
                   <Target className="w-4 h-4 text-emerald-400" />
-                  <span>مسار الاسترداد والتحويل</span>
+                  <span>دورة المتابعة والاسترداد</span>
                 </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  رصد فوري للمغادرين مع إرسال آلي بفواصل 15 ثانية لحماية حسابك
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  معدل الرد: <strong className="text-white font-mono">{summary?.response_rate_percent || 0}%</strong>
+                  تفاعل الأعضاء: <strong className="text-emerald-400 font-mono">{summary?.response_rate_percent || 0}%</strong>
                 </span>
                 <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  العودة بعد الرد: <strong className="text-emerald-400 font-mono">{summary?.conversion_on_response_percent || 0}%</strong>
+                  نسبة الاسترداد الكلية: <strong className="text-emerald-400 font-mono">{summary?.win_back_rate_percent || 0}%</strong>
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-              {(summary?.funnel_stages || []).map((stage, idx) => (
-                <div 
-                  key={stage.id || idx}
-                  className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-medium text-slate-400">
-                      مرحلة {idx + 1}
-                    </span>
-                    <span className="text-xs font-semibold font-mono text-emerald-400">
-                      {stage.percentage}%
-                    </span>
-                  </div>
-                  <span className="text-xs font-medium text-slate-200 block pt-1.5">{stage.name}</span>
-
-                  <div className="pt-3 flex items-baseline justify-between">
-                    <span className="text-2xl font-bold font-mono text-white">{stage.count}</span>
-                    <span className="text-[10px] text-slate-500">عضو</span>
-                  </div>
-
-                  <div className="w-full bg-slate-800/80 h-1 rounded-full overflow-hidden mt-2.5">
-                    <div 
-                      className={`h-full rounded-full transition-all ${
-                        idx === 4 ? 'bg-emerald-500' : idx === 3 ? 'bg-teal-500' : idx === 2 ? 'bg-amber-500' : idx === 1 ? 'bg-blue-500' : 'bg-indigo-500'
-                      }`}
-                      style={{ width: `${Math.max(4, Math.min(100, stage.percentage))}%` }}
-                    />
-                  </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Card 1: Leavers Detected */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+                  <span>إجمالي المغادرين</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">رصد لحظي</span>
                 </div>
-              ))}
+                <div className="mt-3 flex items-baseline justify-between">
+                  <span className="text-2xl font-bold font-mono text-white">{summary?.total_left_detected || 0}</span>
+                  <span className="text-[11px] text-slate-500">عضو مغادر</span>
+                </div>
+              </div>
+
+              {/* Card 2: Contacted */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+                  <span>تم التواصل معهم</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900/40 font-mono">
+                    {summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}%
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline justify-between">
+                  <span className="text-2xl font-bold font-mono text-white">{summary?.total_contacted || 0}</span>
+                  <span className="text-[11px] text-slate-500">تمت مراسلته</span>
+                </div>
+              </div>
+
+              {/* Card 3: Replied */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
+                  <span>ردوا وتفاعلوا</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900/40 font-mono">
+                    {summary?.response_rate_percent || 0}%
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline justify-between">
+                  <span className="text-2xl font-bold font-mono text-amber-300">{summary?.total_in_conversation || 0}</span>
+                  <span className="text-[11px] text-slate-500">محادثة نشطة</span>
+                </div>
+              </div>
+
+              {/* Card 4: Rejoined */}
+              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
+                <div className="flex items-center justify-between text-emerald-400 text-xs font-medium">
+                  <span>عادوا للقناة</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-900/40 font-mono">
+                    {summary?.win_back_rate_percent || 0}%
+                  </span>
+                </div>
+                <div className="mt-3 flex items-baseline justify-between">
+                  <span className="text-2xl font-bold font-mono text-emerald-400">{summary?.total_rejoined || 0}</span>
+                  <span className="text-[11px] text-slate-500">استرداد ناجح</span>
+                </div>
+              </div>
             </div>
           </div>
 

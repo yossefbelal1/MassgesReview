@@ -588,8 +588,8 @@ async def turbo_dispatch_pending_cases(
         c.status = "SCHEDULED"
         c.contactable = True
         c.uncontactable_reason = None
-        # Natural human pacing: stagger each message by 25s (case 0 is now, case 1 is now+25s...)
-        c.scheduled_contact_at = now + timedelta(seconds=idx * 25)
+        # Safe natural pacing: stagger each message by 15s (case 0 is now, case 1 is now+15s...)
+        c.scheduled_contact_at = now + timedelta(seconds=idx * 15)
 
     db.commit()
 
@@ -603,7 +603,7 @@ async def turbo_dispatch_pending_cases(
         "success": True,
         "reset_count": len(cases),
         "dispatched_count": len(cases),
-        "message": f"تم تفعيل الإرسال التوربو الذكي لـ {len(cases)} عضواً بفواصل آمنة (عضو كل 25 ثانية) لحماية الحساب من أي تقييد ⚡"
+        "message": f"تم تفعيل الإرسال الفوري لـ {len(cases)} عضواً بفواصل آمنة (عضو كل 15 ثانية) ⚡"
     }
 
 
