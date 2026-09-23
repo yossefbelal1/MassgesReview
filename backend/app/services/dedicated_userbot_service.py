@@ -20,6 +20,7 @@ from telethon.errors import (
     PhoneCodeExpiredError,
     ApiIdInvalidError,
     PhoneNumberInvalidError,
+    PeerIdInvalidError,
     RPCError
 )
 from telethon.tl.types import InputPeerUser
@@ -492,6 +493,14 @@ class DedicatedUserbotService:
                 "error_ar": f"طلب تيليجرام الانتظار {wait} ثانية.",
                 "can_retry": True,
                 "retry_delay_seconds": wait
+            }
+        except PeerIdInvalidError:
+            return {
+                "success": False,
+                "error": "PEER_ID_INVALID",
+                "error_ar": "لا يملك المستخدم معرفاً عاماً (@username) أو إعدادات خصوصيته تمنع المراسلة المباشرة.",
+                "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
+                "can_retry": False
             }
         except Exception as e:
             logger.error(f"Error sending message from dedicated userbot {channel_id}: {e}", exc_info=True)
