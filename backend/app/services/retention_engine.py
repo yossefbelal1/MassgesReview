@@ -659,16 +659,20 @@ class RetentionEngine:
         pacing_delay = 15.0 if active_bots <= 1 else max(7.0, 15.0 / active_bots)
 
         sent_count = 0
+        failed_tenants = set()
         for case in pending_cases:
+            if case.tenant_id in failed_tenants:
+                continue
+
             res = await self.send_recovery_to_case(db, case)
             if res.get("success"):
                 sent_count += 1
+                await asyncio.sleep(pacing_delay)
             elif res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD"]:
-                # Circuit breaker: stop batch immediately, don't make things worse
-                logger.info(f"[⚠️ Outreach Paused]: {res.get('error')} — stopping batch to avoid amplifying ban.")
-                break
-            # Safe pacing between contacts
-            await asyncio.sleep(pacing_delay)
+                logger.info(f"[⚠️ Outreach Paused for tenant {case.tenant_id}]: {res.get('error')}")
+                failed_tenants.add(case.tenant_id)
+            else:
+                await asyncio.sleep(1.0)
 
         if sent_count > 0:
             logger.info(f"[📊 Outreach Batch]: Sent {sent_count}/{len(pending_cases)} recovery messages this cycle (pacing: {pacing_delay}s).")
