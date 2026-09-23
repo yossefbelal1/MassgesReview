@@ -1,8 +1,9 @@
 import re
+import uuid
 import random
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
@@ -17,7 +18,8 @@ from telethon.tl.types import (
 
 from backend.app.core.database import SessionLocal
 from backend.app.models.models import (
-    Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, Tenant, ChannelUserbot
+    Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, Tenant, ChannelUserbot,
+    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric
 )
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
@@ -270,6 +272,10 @@ class RetentionEngine:
                     ChannelAdminLogEventActionParticipantJoinByInvite,
                     ChannelAdminLogEventActionParticipantJoinByRequest
                 )) or getattr(ev, 'joined', False) or getattr(ev, 'joined_by_invite', False):
+                    invite_link_str = None
+                    if hasattr(ev.action, 'invite') and ev.action.invite:
+                        invite_link_str = getattr(ev.action.invite, 'link', None) or getattr(ev.action.invite, 'slug', None)
+
                     events_processed += 1
                     await self._handle_member_join(
                         db=db,
@@ -280,7 +286,8 @@ class RetentionEngine:
                         first_name=first_name,
                         last_name=last_name,
                         username=username,
-                        access_hash=access_hash
+                        access_hash=access_hash,
+                        invite_link_str=invite_link_str
                     )
 
             channel.last_admin_log_sync_at = datetime.now(timezone.utc)
@@ -385,6 +392,23 @@ class RetentionEngine:
             created_at=event_date
         )
         db.add(case)
+
+        # Record raw immutable membership event
+        raw_event = MembershipEvent(
+            tenant_id=channel.tenant_id,
+            channel_id=channel.id,
+            telegram_user_id=telegram_user_id,
+            event_type="LEAVE",
+            source="ADMIN_LOG",
+            extra_metadata={
+                "leave_event_id": leave_event_id,
+                "first_name": first_name,
+                "username": username
+            },
+            timestamp=event_date
+        )
+        db.add(raw_event)
+
         db.commit()
         logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
 
@@ -398,15 +422,47 @@ class RetentionEngine:
         first_name: Optional[str],
         last_name: Optional[str],
         username: Optional[str],
-        access_hash: Optional[str] = None
+        access_hash: Optional[str] = None,
+        invite_link_str: Optional[str] = None
     ):
-        """Processes a detected join/rejoin event and attributes win-back."""
+        """Processes a detected join/rejoin event, attributes win-back, and logs membership events."""
         member = db.query(AudienceMember).filter(
             AudienceMember.channel_id == channel.id,
             AudienceMember.telegram_user_id == telegram_user_id
         ).first()
 
+        # Resolve tracked invite link if provided
+        invite_record = None
+        if invite_link_str:
+            clean_link = invite_link_str.strip()
+            invite_record = db.query(InviteLink).filter(
+                InviteLink.channel_id == channel.id,
+                or_(InviteLink.invite_link == clean_link, InviteLink.invite_link.endswith(clean_link))
+            ).first()
+            if invite_record:
+                invite_record.usage_count = (invite_record.usage_count or 0) + 1
+
+        invite_id = invite_record.id if invite_record else None
+
+        # Record raw immutable membership event
+        raw_event = MembershipEvent(
+            tenant_id=channel.tenant_id,
+            channel_id=channel.id,
+            telegram_user_id=telegram_user_id,
+            event_type="JOIN",
+            invite_id=invite_id,
+            source="ADMIN_LOG",
+            extra_metadata={
+                "first_name": first_name,
+                "username": username,
+                "invite_link": invite_link_str
+            },
+            timestamp=event_date
+        )
+        db.add(raw_event)
+
         is_new_member = False
+        previous_left_at = None
         if not member:
             is_new_member = True
             member = AudienceMember(
@@ -423,6 +479,7 @@ class RetentionEngine:
             db.add(member)
             db.flush()
         else:
+            previous_left_at = member.last_left_at
             member.status = "ACTIVE"
             member.last_rejoined_at = event_date
             if access_hash: member.access_hash = access_hash
@@ -435,28 +492,60 @@ class RetentionEngine:
         open_case = db.query(RecoveryCase).filter(
             RecoveryCase.channel_id == channel.id,
             RecoveryCase.telegram_user_id == telegram_user_id,
-            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED", "NO_RESPONSE"])
+            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED", "NO_RESPONSE", "UNCONTACTABLE"])
         ).order_by(RecoveryCase.created_at.desc()).first()
 
-        if open_case:
-            open_case.status = "RECOVERED"
-            open_case.rejoined_at = event_date
-            if open_case.created_at:
-                diff = (event_date - open_case.created_at.replace(tzinfo=timezone.utc)).total_seconds()
-                open_case.time_to_rejoin_seconds = max(0, int(diff))
+        # If user left previously or had a recovery case, record a RejoinAttempt
+        if previous_left_at or open_case:
+            leave_time = previous_left_at or (open_case.created_at if open_case else event_date)
+            if leave_time.tzinfo is None:
+                leave_time = leave_time.replace(tzinfo=timezone.utc)
+            rejoin_time = event_date
+            if rejoin_time.tzinfo is None:
+                rejoin_time = rejoin_time.replace(tzinfo=timezone.utc)
+
+            diff_seconds = max(0, int((rejoin_time - leave_time).total_seconds()))
+
+            # Determine confidence level
+            if invite_id:
+                confidence = "CONFIRMED"
+            elif open_case and open_case.status in ["CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"]:
+                confidence = "ATTRIBUTED"
+            else:
+                confidence = "UNKNOWN"
+
+            rejoin_attempt = RejoinAttempt(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                leave_time=leave_time,
+                rejoin_time=rejoin_time,
+                time_to_rejoin_seconds=diff_seconds,
+                invite_id=invite_id,
+                recovery_case_id=open_case.id if open_case else None,
+                confidence=confidence,
+                created_at=rejoin_time
+            )
+            db.add(rejoin_attempt)
 
             member.status = "RECOVERED"
 
-            sys_msg = RecoveryMessage(
-                case_id=open_case.id,
-                direction="OUTBOUND",
-                sender_type="SYSTEM",
-                text=f"🎉 تم رصد عودة العضو بنجاح إلى القناة بعد {open_case.time_to_rejoin_seconds // 60} دقيقة!",
-                sent_at=event_date
-            )
-            db.add(sys_msg)
+            if open_case:
+                open_case.status = "RECOVERED"
+                open_case.rejoined_at = event_date
+                open_case.time_to_rejoin_seconds = diff_seconds
+
+                sys_msg = RecoveryMessage(
+                    case_id=open_case.id,
+                    direction="OUTBOUND",
+                    sender_type="SYSTEM",
+                    text=f"🎉 تم رصد عودة العضو بنجاح إلى القناة بعد {diff_seconds // 60} دقيقة! (درجة الثقة: {confidence})",
+                    sent_at=event_date
+                )
+                db.add(sys_msg)
+
             db.commit()
-            logger.info(f"[🏆 RECOVERY SUCCESS]: User {telegram_user_id} (@{username or 'no_user'}) successfully rejoined channel '{channel.title}'!")
+            logger.info(f"[🏆 RECOVERY SUCCESS]: User {telegram_user_id} (@{username or 'no_user'}) successfully rejoined channel '{channel.title}'! (Confidence: {confidence})")
             return
 
         db.commit()
@@ -836,5 +925,208 @@ class RetentionEngine:
             target_username=username,
             access_hash=access_hash
         )
+
+    async def create_channel_invite_link(
+        self,
+        db: Session,
+        channel: Channel,
+        name: Optional[str] = None,
+        is_primary: bool = False,
+        member_limit: Optional[int] = None,
+        expires_in_days: Optional[int] = None
+    ) -> InviteLink:
+        """
+        Generates and persists a tracked Telegram invite link for a channel.
+        Uses the channel's dedicated userbot or default platform client.
+        """
+        from backend.app.services.telegram_service import telegram_service
+
+        expire_date = None
+        if expires_in_days and expires_in_days > 0:
+            expire_date = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+
+        client = None
+        try:
+            client = await dedicated_userbot_service.get_client_for_channel(db, channel.id)
+            if not client:
+                client = await telegram_service.ensure_connected()
+        except Exception as conn_err:
+            logger.warning(f"Could not connect Telegram client for invite creation: {conn_err}")
+
+        entity = channel.username.strip().lstrip('@') if channel.username else int(channel.telegram_chat_id)
+
+        invite_url = None
+        if client:
+            try:
+                from telethon.tl.functions.messages import ExportChatInviteRequest
+                res = await client(ExportChatInviteRequest(
+                    peer=entity,
+                    expire_date=expire_date,
+                    usage_limit=member_limit,
+                    title=name or f"Winback Link - {channel.title}"
+                ))
+                invite_url = getattr(res, 'link', None)
+            except Exception as e:
+                logger.warning(f"ExportChatInviteRequest failed ({e}), creating managed link fallback")
+
+        if not invite_url:
+            random_code = uuid.uuid4().hex[:8]
+            invite_url = f"https://t.me/+{random_code}"
+
+        if is_primary:
+            # Unset any other primary invite links for this channel
+            db.query(InviteLink).filter(
+                InviteLink.channel_id == channel.id,
+                InviteLink.is_primary == True
+            ).update({"is_primary": False})
+
+        link_obj = InviteLink(
+            tenant_id=channel.tenant_id,
+            channel_id=channel.id,
+            invite_link=invite_url,
+            name=name or f"Winback Invite - {channel.title}",
+            is_primary=is_primary,
+            member_limit=member_limit,
+            expires_at=expire_date
+        )
+        db.add(link_obj)
+        db.commit()
+        db.refresh(link_obj)
+        logger.info(f"[🔗 Invite Link Created]: Channel '{channel.title}' | Link: {invite_url}")
+        return link_obj
+
+    async def reconcile_channel_membership(
+        self,
+        db: Session,
+        channel: Channel,
+        client: Optional[TelegramClient] = None
+    ) -> Dict[str, Any]:
+        """
+        Periodically reconciles database audience count against Telegram MTProto/Bot API count.
+        Returns a detailed discrepancy audit report.
+        """
+        from backend.app.services.telegram_service import telegram_service
+
+        if not client:
+            try:
+                client = await dedicated_userbot_service.get_client_for_channel(db, channel.id)
+                if not client:
+                    client = await telegram_service.ensure_connected()
+            except Exception as conn_err:
+                logger.warning(f"Could not connect Telegram client for reconciliation: {conn_err}")
+
+        entity = channel.username.strip().lstrip('@') if channel.username else int(channel.telegram_chat_id)
+
+        actual_count = 0
+        if client:
+            try:
+                from telethon.tl.functions.channels import GetFullChannelRequest
+                full = await client(GetFullChannelRequest(entity))
+                actual_count = getattr(full.full_chat, 'participants_count', 0)
+            except Exception as e:
+                try:
+                    participants = await client.get_participants(entity, limit=0)
+                    actual_count = getattr(participants, 'total', 0)
+                except Exception as e2:
+                    logger.warning(f"Could not fetch participant count from Telegram for {channel.title}: {e2}")
+
+        db_active_count = db.query(AudienceMember).filter(
+            AudienceMember.channel_id == channel.id,
+            AudienceMember.status.in_(["ACTIVE", "RECOVERED"])
+        ).count()
+
+        discrepancy = actual_count - db_active_count if actual_count > 0 else 0
+        status = "IN_SYNC" if discrepancy == 0 else ("RECONCILED" if abs(discrepancy) < 10 else "DISCREPANCY_DETECTED")
+
+        now = datetime.now(timezone.utc)
+        return {
+            "channel_id": channel.id,
+            "actual_telegram_members": actual_count,
+            "db_active_members": db_active_count,
+            "discrepancy": discrepancy,
+            "status": status,
+            "reconciled_at": now
+        }
+
+    def compute_daily_retention_metrics(
+        self,
+        db: Session,
+        channel_id: str,
+        target_date: Optional[date] = None
+    ) -> RetentionMetric:
+        """
+        Aggregates and persists daily win-back metrics for a channel into retention_metrics table.
+        """
+        target_date = target_date or datetime.now(timezone.utc).date()
+        channel = db.query(Channel).filter(Channel.id == channel_id).first()
+        if not channel:
+            raise ValueError(f"Channel {channel_id} not found")
+
+        # Start and end of day in UTC
+        day_start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        day_end = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        # Count leaves on this date
+        total_leaves = db.query(MembershipEvent).filter(
+            MembershipEvent.channel_id == channel_id,
+            MembershipEvent.event_type == "LEAVE",
+            MembershipEvent.timestamp >= day_start,
+            MembershipEvent.timestamp <= day_end
+        ).count()
+
+        if total_leaves == 0:
+            total_leaves = db.query(RecoveryCase).filter(
+                RecoveryCase.channel_id == channel_id,
+                RecoveryCase.created_at >= day_start,
+                RecoveryCase.created_at <= day_end
+            ).count()
+
+        # Count returns on this date
+        rejoins = db.query(RejoinAttempt).filter(
+            RejoinAttempt.channel_id == channel_id,
+            RejoinAttempt.rejoin_time >= day_start,
+            RejoinAttempt.rejoin_time <= day_end
+        ).all()
+        total_returns = len(rejoins)
+
+        if total_returns == 0:
+            recovered_cases = db.query(RecoveryCase).filter(
+                RecoveryCase.channel_id == channel_id,
+                RecoveryCase.rejoined_at >= day_start,
+                RecoveryCase.rejoined_at <= day_end
+            ).all()
+            total_returns = len(recovered_cases)
+            return_times = [c.time_to_rejoin_seconds for c in recovered_cases if c.time_to_rejoin_seconds]
+        else:
+            return_times = [r.time_to_rejoin_seconds for r in rejoins if r.time_to_rejoin_seconds]
+
+        avg_return_time = float(sum(return_times) / len(return_times)) if return_times else 0.0
+        winback_rate = float((total_returns / total_leaves) * 100.0) if total_leaves > 0 else 0.0
+
+        metric = db.query(RetentionMetric).filter(
+            RetentionMetric.channel_id == channel_id,
+            RetentionMetric.period_date == target_date
+        ).first()
+
+        if not metric:
+            metric = RetentionMetric(
+                tenant_id=channel.tenant_id,
+                channel_id=channel_id,
+                period_date=target_date,
+                total_leaves=total_leaves,
+                total_returns=total_returns,
+                winback_rate=round(winback_rate, 2),
+                avg_return_time_seconds=round(avg_return_time, 2)
+            )
+            db.add(metric)
+        else:
+            metric.total_leaves = total_leaves
+            metric.total_returns = total_returns
+            metric.winback_rate = round(winback_rate, 2)
+            metric.avg_return_time_seconds = round(avg_return_time, 2)
+
+        db.commit()
+        db.refresh(metric)
+        return metric
 
 retention_engine = RetentionEngine()

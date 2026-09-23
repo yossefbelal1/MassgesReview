@@ -29,6 +29,10 @@ class Tenant(Base):
     audience_members = relationship("AudienceMember", back_populates="tenant", cascade="all, delete-orphan")
     recovery_cases = relationship("RecoveryCase", back_populates="tenant", cascade="all, delete-orphan")
     channel_userbots = relationship("ChannelUserbot", back_populates="tenant", cascade="all, delete-orphan")
+    invite_links = relationship("InviteLink", back_populates="tenant", cascade="all, delete-orphan")
+    membership_events = relationship("MembershipEvent", back_populates="tenant", cascade="all, delete-orphan")
+    rejoin_attempts = relationship("RejoinAttempt", back_populates="tenant", cascade="all, delete-orphan")
+    retention_metrics = relationship("RetentionMetric", back_populates="tenant", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -109,6 +113,10 @@ class Channel(Base):
     recovery_cases = relationship("RecoveryCase", back_populates="channel", cascade="all, delete-orphan")
     userbot = relationship("ChannelUserbot", back_populates="channel", uselist=False, cascade="all, delete-orphan")
     login_attempts = relationship("UserbotLoginAttempt", back_populates="channel", cascade="all, delete-orphan")
+    invite_links = relationship("InviteLink", back_populates="channel", cascade="all, delete-orphan")
+    membership_events = relationship("MembershipEvent", back_populates="channel", cascade="all, delete-orphan")
+    rejoin_attempts = relationship("RejoinAttempt", back_populates="channel", cascade="all, delete-orphan")
+    retention_metrics = relationship("RetentionMetric", back_populates="channel", cascade="all, delete-orphan")
 
 class MessageLibrary(Base):
     __tablename__ = "message_library"
@@ -403,5 +411,103 @@ class UserbotLoginAttempt(Base):
     )
 
     channel = relationship("Channel", back_populates="login_attempts")
+
+
+class InviteLink(Base):
+    __tablename__ = "invite_links"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    invite_link = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=True)
+    is_primary = Column(Boolean, default=False)
+    member_limit = Column(Integer, nullable=True)
+    usage_count = Column(Integer, default=0)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_invite_tenant_channel", "tenant_id", "channel_id"),
+    )
+
+    tenant = relationship("Tenant", back_populates="invite_links")
+    channel = relationship("Channel", back_populates="invite_links")
+    events = relationship("MembershipEvent", back_populates="invite")
+    rejoins = relationship("RejoinAttempt", back_populates="invite")
+
+
+class MembershipEvent(Base):
+    __tablename__ = "membership_events"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    telegram_user_id = Column(String(64), index=True, nullable=False)
+    event_type = Column(String(32), nullable=False)  # JOIN, LEAVE, JOIN_REQUEST
+    invite_id = Column(String, ForeignKey("invite_links.id", ondelete="SET NULL"), nullable=True)
+    source = Column(String(32), default="ADMIN_LOG")  # ADMIN_LOG, CHAT_MEMBER_UPDATED, RECONCILIATION
+    extra_metadata = Column(JSON, default=dict)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        Index("idx_event_tenant_channel_time", "tenant_id", "channel_id", "timestamp"),
+        Index("idx_event_tg_user", "telegram_user_id", "event_type"),
+    )
+
+    tenant = relationship("Tenant", back_populates="membership_events")
+    channel = relationship("Channel", back_populates="membership_events")
+    invite = relationship("InviteLink", back_populates="events")
+
+
+class RejoinAttempt(Base):
+    __tablename__ = "rejoin_attempts"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    telegram_user_id = Column(String(64), index=True, nullable=False)
+    leave_time = Column(DateTime, nullable=False)
+    rejoin_time = Column(DateTime, nullable=False)
+    time_to_rejoin_seconds = Column(Integer, default=0)
+    invite_id = Column(String, ForeignKey("invite_links.id", ondelete="SET NULL"), nullable=True)
+    recovery_case_id = Column(String, ForeignKey("recovery_cases.id", ondelete="SET NULL"), nullable=True)
+    confidence = Column(String(32), default="UNKNOWN")  # CONFIRMED, ATTRIBUTED, UNKNOWN
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_rejoin_tenant_channel_time", "tenant_id", "channel_id", "rejoin_time"),
+        Index("idx_rejoin_confidence", "confidence"),
+    )
+
+    tenant = relationship("Tenant", back_populates="rejoin_attempts")
+    channel = relationship("Channel", back_populates="rejoin_attempts")
+    invite = relationship("InviteLink", back_populates="rejoins")
+    recovery_case = relationship("RecoveryCase")
+
+
+class RetentionMetric(Base):
+    __tablename__ = "retention_metrics"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    period_date = Column(Date, nullable=False)
+    total_leaves = Column(Integer, default=0)
+    total_returns = Column(Integer, default=0)
+    winback_rate = Column(Float, default=0.0)
+    avg_return_time_seconds = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_metric_tenant_channel_date", "tenant_id", "channel_id", "period_date"),
+        UniqueConstraint("channel_id", "period_date", name="uq_channel_period_date"),
+    )
+
+    tenant = relationship("Tenant", back_populates="retention_metrics")
+    channel = relationship("Channel", back_populates="retention_metrics")
+
 
 

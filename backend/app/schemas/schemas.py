@@ -1,5 +1,5 @@
 from typing import Optional, List, Any
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel, EmailStr
 
 # Auth & User
@@ -373,6 +373,76 @@ class ChannelUserbotOut(BaseModel):
     created_at: datetime
     class Config:
         from_attributes = True
+
+
+# ── SaaS Retention & Winback Schemas ──────────────────────────────────────────
+class InviteLinkCreate(BaseModel):
+    name: Optional[str] = None
+    is_primary: bool = False
+    member_limit: Optional[int] = None
+    expires_in_days: Optional[int] = None
+
+class InviteLinkOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    invite_link: str
+    name: Optional[str]
+    is_primary: bool
+    member_limit: Optional[int]
+    usage_count: int
+    expires_at: Optional[datetime]
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class MembershipEventOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    telegram_user_id: str
+    event_type: str
+    invite_id: Optional[str]
+    source: str
+    extra_metadata: Optional[dict] = {}
+    timestamp: datetime
+    class Config:
+        from_attributes = True
+
+class RejoinAttemptOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    telegram_user_id: str
+    leave_time: datetime
+    rejoin_time: datetime
+    time_to_rejoin_seconds: int
+    invite_id: Optional[str]
+    confidence: str
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class RetentionMetricOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    period_date: date
+    total_leaves: int
+    total_returns: int
+    winback_rate: float
+    avg_return_time_seconds: float
+    class Config:
+        from_attributes = True
+
+class ReconciliationResultOut(BaseModel):
+    channel_id: str
+    actual_telegram_members: int
+    db_active_members: int
+    discrepancy: int
+    status: str
+    reconciled_at: datetime
+
 
 
 

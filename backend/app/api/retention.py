@@ -9,13 +9,15 @@ from sqlalchemy import func, desc, or_, extract
 from backend.app.core.database import get_db
 from backend.app.api.deps import get_current_user, get_current_tenant_id
 from backend.app.models.models import (
-    User, Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, ChannelUserbot
+    User, Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, ChannelUserbot,
+    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric
 )
 from backend.app.schemas.schemas import (
     RecoveryCaseOut, RecoveryCaseDetailOut, RecoveryMessageOut, RecoveryMessageCreate,
     RetentionSettingOut, RetentionSettingUpdate, AudienceMemberOut, RetentionSummaryOut,
     UserbotSendCodeRequest, UserbotSendCodeResponse, UserbotVerifyCodeRequest, UserbotVerifyCodeResponse,
-    ChannelUserbotOut
+    ChannelUserbotOut, InviteLinkCreate, InviteLinkOut, MembershipEventOut, RejoinAttemptOut,
+    RetentionMetricOut, ReconciliationResultOut
 )
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
@@ -597,6 +599,7 @@ async def turbo_dispatch_pending_cases(
         eb.cooldown_until = None
         eb.last_error = None
 
+    cases = query.all()
     for idx, c in enumerate(cases):
         c.status = "SCHEDULED"
         c.contactable = True
@@ -909,5 +912,181 @@ async def update_channel_userbot_avatar(
         raise HTTPException(status_code=400, detail="حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)")
 
     return await dedicated_userbot_service.upload_userbot_avatar(db, channel_id, contents)
+
+
+# ── SaaS Multi-Tenant Retention & Winback API Endpoints ──────────────────────
+
+@router.post("/channels/{channel_id}/invite-links", response_model=InviteLinkOut)
+async def create_channel_invite_link_endpoint(
+    channel_id: str,
+    payload: InviteLinkCreate,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Creates and tracks a new dedicated Telegram invite link for a channel.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    return await retention_engine.create_channel_invite_link(
+        db=db,
+        channel=channel,
+        name=payload.name,
+        is_primary=payload.is_primary,
+        member_limit=payload.member_limit,
+        expires_in_days=payload.expires_in_days
+    )
+
+
+@router.get("/channels/{channel_id}/invite-links", response_model=List[InviteLinkOut])
+def get_channel_invite_links(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Lists all invite links generated for a channel with usage counters.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    return db.query(InviteLink).filter(
+        InviteLink.channel_id == channel_id,
+        InviteLink.tenant_id == tenant_id
+    ).order_by(desc(InviteLink.created_at)).all()
+
+
+@router.get("/channels/{channel_id}/events", response_model=List[MembershipEventOut])
+def get_channel_membership_events(
+    channel_id: str,
+    event_type: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns immutable event log of joins and leaves for a channel.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    q = db.query(MembershipEvent).filter(
+        MembershipEvent.channel_id == channel_id,
+        MembershipEvent.tenant_id == tenant_id
+    )
+    if event_type:
+        q = q.filter(MembershipEvent.event_type == event_type.upper())
+    return q.order_by(desc(MembershipEvent.timestamp)).limit(limit).all()
+
+
+@router.get("/channels/{channel_id}/rejoins", response_model=List[RejoinAttemptOut])
+def get_channel_rejoin_attempts(
+    channel_id: str,
+    confidence: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns rejoin/winback attempts with confidence attribution (CONFIRMED, ATTRIBUTED, UNKNOWN).
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    q = db.query(RejoinAttempt).filter(
+        RejoinAttempt.channel_id == channel_id,
+        RejoinAttempt.tenant_id == tenant_id
+    )
+    if confidence:
+        q = q.filter(RejoinAttempt.confidence == confidence.upper())
+    return q.order_by(desc(RejoinAttempt.rejoin_time)).limit(limit).all()
+
+
+@router.post("/channels/{channel_id}/reconcile", response_model=ReconciliationResultOut)
+async def reconcile_channel_endpoint(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Triggers an on-demand reconciliation audit between Telegram participant count and database.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    return await retention_engine.reconcile_channel_membership(db, channel)
+
+
+@router.get("/channels/{channel_id}/metrics", response_model=List[RetentionMetricOut])
+def get_channel_retention_metrics(
+    channel_id: str,
+    days: int = Query(30, le=365),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieves pre-computed daily retention & winback metrics for a channel.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).date()
+    return db.query(RetentionMetric).filter(
+        RetentionMetric.channel_id == channel_id,
+        RetentionMetric.tenant_id == tenant_id,
+        RetentionMetric.period_date >= start_date
+    ).order_by(desc(RetentionMetric.period_date)).all()
+
+
+@router.post("/channels/{channel_id}/metrics/compute", response_model=RetentionMetricOut)
+def compute_channel_metrics_endpoint(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually triggers computation of today's retention metrics for a channel.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    return retention_engine.compute_daily_retention_metrics(db, channel_id)
+
 
 

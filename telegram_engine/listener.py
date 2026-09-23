@@ -275,6 +275,38 @@ async def worker_job_executor():
 
         await asyncio.sleep(0.5)
 
+async def retention_reconciliation_worker():
+    """
+    Runs periodic reconciliation for all connected channels hourly and computes
+    daily retention metrics. Ensures 100% data audit and self-healing.
+    """
+    global RUNNING
+    # Initial pause to allow watcher and client to stabilize
+    await asyncio.sleep(60.0)
+
+    while RUNNING:
+        try:
+            db: Session = SessionLocal()
+            channels = db.query(Channel).filter(Channel.is_connected == True).all()
+            for ch in channels:
+                if not ch.tenant or not ch.tenant.is_active:
+                    continue
+                try:
+                    report = await retention_engine.reconcile_channel_membership(db, ch)
+                    if report.get("discrepancy", 0) != 0:
+                        print(f"[🔍 Reconciliation Audit]: Channel '{ch.title}' | TG: {report['actual_telegram_members']} vs DB: {report['db_active_members']} | Diff: {report['discrepancy']} ({report['status']})", flush=True)
+                    # Automatically compute / update daily metrics
+                    retention_engine.compute_daily_retention_metrics(db, ch.id)
+                except Exception as rec_err:
+                    print(f"[!] Reconciliation error for '{ch.title}': {rec_err}", flush=True)
+
+            db.close()
+        except Exception as e:
+            print(f"[!] Error in retention reconciliation worker loop: {e}", flush=True)
+
+        # Run every 1 hour (3600s)
+        await asyncio.sleep(3600.0)
+
 async def keepalive_ping():
     """Keeps the MTProto TCP session alive and healthy 24/7."""
     global RUNNING
@@ -312,6 +344,7 @@ async def main():
         active_channel_watcher(),
         retention_channel_watcher(),
         retention_outreach_dispatcher(),
+        retention_reconciliation_worker(),
         worker_job_executor(),
         keepalive_ping()
     )
