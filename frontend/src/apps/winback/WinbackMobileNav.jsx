@@ -19,34 +19,33 @@ export default function WinbackMobileNav({ isOpen, onClose, activeTab, onSelectT
   return (
     <>
       {/* Mobile Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 px-2 flex items-center justify-around z-30 select-none" dir="rtl">
-        {navItems.slice(0, 4).map((item) => {
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 pb-safe bg-slate-900/95 backdrop-blur-2xl border-t border-slate-800/90 px-3 py-2 flex items-center justify-around z-40 select-none shadow-2xl shadow-black" dir="rtl">
+        {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
             <button
               key={item.id}
               onClick={() => onSelectTab(item.id)}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
-                isActive ? 'text-emerald-400 font-bold' : 'text-slate-500 hover:text-slate-300'
+              className={`relative flex flex-col items-center justify-center py-1 px-2.5 rounded-2xl transition-all duration-200 active:scale-90 ${
+                isActive 
+                  ? 'text-emerald-400 font-bold bg-emerald-500/10' 
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className={`w-5 h-5 mb-0.5 ${isActive ? 'scale-110' : ''}`} />
-              <span className="text-[10px] leading-tight truncate max-w-[65px]">{item.label.split(' ')[0]}</span>
+              {isActive && (
+                <span className="absolute -top-1 w-5 h-1 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"></span>
+              )}
+              <Icon className={`w-5 h-5 mb-0.5 transition-transform ${isActive ? 'scale-110 text-emerald-400' : 'text-slate-400'}`} />
+              <span className="text-[10px] leading-tight font-medium tracking-tight">
+                {item.id === 'cases' ? 'الحالات' :
+                 item.id === 'analytics' ? 'التحليلات' :
+                 item.id === 'members' ? 'الأعضاء' :
+                 item.id === 'settings' ? 'الإعدادات' : 'اليوزربوت'}
+              </span>
             </button>
           );
         })}
-
-        {/* 5th item: More / Drawer trigger */}
-        <button
-          onClick={() => onSelectTab('userbots')}
-          className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all ${
-            activeTab === 'userbots' ? 'text-emerald-400 font-bold' : 'text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          <Bot className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] leading-tight">اليوزربوت</span>
-        </button>
       </nav>
 
       {/* Slide-out Drawer */}

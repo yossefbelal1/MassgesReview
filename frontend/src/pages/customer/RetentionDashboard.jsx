@@ -550,41 +550,43 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         </div>
       )}
 
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <UserCheck className="w-5 h-5 text-emerald-400" />
-            <span>استرداد الأعضاء</span>
-          </h1>
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-sm">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            مباشر ولحظي
-          </span>
+      {/* Top Header / Channel & Live Status Bar */}
+      <div className="flex items-center justify-between gap-2.5 p-2 sm:p-0 bg-slate-900/60 sm:bg-transparent rounded-2xl sm:rounded-none border border-slate-800/80 sm:border-0">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+            <UserCheck className="w-4 h-4" />
+          </div>
+          <div>
+            <h1 className="text-sm sm:text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
+              <span>استرداد الأعضاء</span>
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+            </h1>
+            <span className="text-[10px] text-emerald-400 font-semibold block sm:hidden">رصد واستعادة 24/7</span>
+          </div>
         </div>
 
         {/* Channel Selector & Refresh */}
         <div className="flex items-center gap-2">
           {channels.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 hidden sm:inline">القناة:</span>
-              <select
-                value={selectedChannelId}
-                onChange={(e) => setSelectedChannelId(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 min-h-[38px]"
-              >
-                <option value="">جميع القنوات</option>
-                {channels.map((ch) => (
-                  <option key={ch.id} value={ch.id}>{ch.title}</option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={selectedChannelId}
+              onChange={(e) => setSelectedChannelId(e.target.value)}
+              className="px-3 py-1.5 sm:py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-bold outline-none focus:border-emerald-500 max-w-[150px] sm:max-w-none truncate"
+            >
+              <option value="">جميع القنوات</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.title}</option>
+              ))}
+            </select>
           )}
           <button
             onClick={() => fetchData(false)}
             disabled={loading}
             title="تحديث البيانات فوراً"
-            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all min-h-[38px]"
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-850 active:scale-95 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
             <span className="hidden sm:inline">تحديث</span>
@@ -592,46 +594,76 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         </div>
       </div>
 
-      {/* KPI Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        {/* Win-back Rate */}
-        <div className="col-span-2 sm:col-span-1 p-4 rounded-xl bg-slate-900/90 border border-emerald-500/30">
-          <span className="text-xs text-emerald-400 font-medium block">معدل الاسترداد</span>
-          <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-bold text-white font-mono">{summary?.win_back_rate_percent || 0}%</span>
-            <span className="text-[11px] text-slate-400">({summary?.total_rejoined || 0} من {summary?.total_left_detected || 0})</span>
+      {/* KPI Metrics: Compact Mobile App Style Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
+        {/* Win-back Rate Card */}
+        <div className="col-span-2 sm:col-span-1 p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/40 shadow-sm relative overflow-hidden">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] sm:text-xs text-emerald-400 font-bold">معدل الاسترداد</span>
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+          </div>
+          <div className="flex items-baseline justify-between sm:justify-start gap-2">
+            <span className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
+              {summary?.win_back_rate_percent || 0}%
+            </span>
+            <span className="text-[10px] sm:text-[11px] text-emerald-400/80 font-medium">
+              ({summary?.total_rejoined || 0} عادوا من {summary?.total_left_detected || 0})
+            </span>
+          </div>
+          {/* Visual Mini Progress Bar */}
+          <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+            <div 
+              className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+              style={{ width: `${Math.min(100, summary?.win_back_rate_percent || 0)}%` }}
+            ></div>
           </div>
         </div>
 
         {/* Total Left */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
-          <span className="text-xs text-slate-400 font-medium block">إجمالي المغادرين</span>
-          <div className="mt-1">
-            <span className="text-2xl font-bold text-white font-mono">{summary?.total_left_detected || 0}</span>
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] sm:text-xs text-slate-400 font-semibold">المغادرين</span>
+            <Users className="w-3.5 h-3.5 text-slate-500" />
+          </div>
+          <div>
+            <span className="text-xl sm:text-2xl font-black text-white font-mono">{summary?.total_left_detected || 0}</span>
+            <span className="text-[9px] text-slate-500 block">مرصود تلقائياً</span>
           </div>
         </div>
 
         {/* Contacted */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
-          <span className="text-xs text-slate-400 font-medium block">تم التواصل</span>
-          <div className="mt-1">
-            <span className="text-2xl font-bold text-white font-mono">{summary?.total_contacted || 0}</span>
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] sm:text-xs text-blue-400 font-semibold">تم التواصل</span>
+            <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+          </div>
+          <div>
+            <span className="text-xl sm:text-2xl font-black text-blue-400 font-mono">{summary?.total_contacted || 0}</span>
+            <span className="text-[9px] text-slate-500 block">رسائل استرداد</span>
           </div>
         </div>
 
         {/* Rejoined */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
-          <span className="text-xs text-emerald-400 font-medium block">عادوا للقناة</span>
-          <div className="mt-1">
-            <span className="text-2xl font-bold text-emerald-400 font-mono">{summary?.total_rejoined || 0}</span>
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] sm:text-xs text-emerald-400 font-semibold">عادوا للقناة</span>
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          </div>
+          <div>
+            <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">{summary?.total_rejoined || 0}</span>
+            <span className="text-[9px] text-emerald-500/80 block">استرداد ناجح 🎉</span>
           </div>
         </div>
 
         {/* In Queue */}
-        <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800">
-          <span className="text-xs text-slate-400 font-medium block">في طابور الإرسال</span>
-          <div className="mt-1">
-            <span className="text-2xl font-bold text-amber-400 font-mono">{summary?.total_scheduled_pending || 0}</span>
+        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[11px] sm:text-xs text-amber-400 font-semibold">في الطابور</span>
+            <Clock className="w-3.5 h-3.5 text-amber-400" />
+          </div>
+          <div>
+            <span className="text-xl sm:text-2xl font-black text-amber-400 font-mono">{summary?.total_scheduled_pending || 0}</span>
+            <span className="text-[9px] text-amber-500/80 block">إرسال متتابع ⚡</span>
           </div>
         </div>
       </div>
@@ -710,193 +742,320 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             </div>
           )}
 
-          {/* Filters Bar */}
-          <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 absolute right-3 top-3 text-slate-500" />
+          {/* Filters & Action Bar */}
+          <div className="p-3 sm:p-4 bg-slate-900 border border-slate-800/90 rounded-2xl shadow-sm space-y-2.5">
+            {/* Search Input */}
+            <div className="relative w-full">
+              <Search className="w-4 h-4 absolute right-3.5 top-3 text-slate-500 pointer-events-none" />
               <input
                 type="text"
                 placeholder="البحث بالاسم، المعرف، أو اليوزر..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pr-9 pl-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none focus:border-emerald-500"
+                className="w-full pr-10 pl-9 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500 transition-colors"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-3 top-2.5 p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+                  title="مسح البحث"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
+            {/* Filter Dropdown + Refresh Button */}
             <div className="flex items-center gap-2">
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white outline-none"
+                className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white font-medium outline-none focus:border-emerald-500"
               >
-                <option value="">جميع الحالات</option>
+                <option value="">جميع الحالات ({cases.length})</option>
                 <option value="RECOVERED">تم الاسترداد 🟢</option>
                 <option value="CONVERSATION_ACTIVE">قيد المحادثة 💬</option>
                 <option value="LINK_DELIVERED">تم إرسال الرابط 🔗</option>
                 <option value="CONTACTED">تم التواصل 📩</option>
-                <option value="SCHEDULED">مجدولة للتواصل ⏱️</option>
-                <option value="UNCONTACTABLE">غير قابل للتواصل 🛡️</option>
-                <option value="OPT_OUT">رفض الاستمرار ⛔</option>
+                <option value="SCHEDULED">مجدولة في الطابور ⏱️</option>
+                <option value="UNCONTACTABLE">تتطلب مراسلة يدوية 👤</option>
+                <option value="OPT_OUT">رفض المتابعة ⛔</option>
               </select>
 
               <button
-                onClick={handleSendAllPendingNow}
-                disabled={bulkSending}
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50"
-                title="بدء إرسال رسائل الاسترداد لجميع الحالات المعلقة بفاصل 15 ثانية"
+                onClick={() => fetchData(false)}
+                className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 transition-all flex items-center justify-center shrink-0"
+                title="تحديث الحالات"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>{bulkSending ? 'جاري الإرسال (فاصل 15 ثانية)...' : '⚡ إرسال فوري لجميع المغادرين (فاصل 15 ثانية)'}</span>
-              </button>
-
-              <button
-                onClick={fetchData}
-                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-                title="تحديث"
-              >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+                <span className="hidden sm:inline mr-1 text-xs">تحديث</span>
               </button>
             </div>
+
+            {/* High-Impact Turbo Dispatch Button */}
+            <button
+              onClick={handleSendAllPendingNow}
+              disabled={bulkSending}
+              className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:scale-98 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-950/60 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Zap className={`w-4 h-4 text-amber-300 ${bulkSending ? 'animate-spin' : 'animate-pulse'}`} />
+              <span>
+                {bulkSending 
+                  ? 'جاري تفعيل الإرسال الفوري لجميع الحالات...' 
+                  : `⚡ إرسال فوري لجميع المغادرين بالفاصل الذكي (${summary?.total_scheduled_pending || 0} في الطابور)`}
+              </span>
+            </button>
           </div>
 
-          {/* Cases Feed / Table */}
+          {/* Cases Feed / Cards & Table */}
           {loading ? (
-            <div className="p-12 text-center text-slate-400">جاري تحميل حالات الاسترداد...</div>
+            <div className="p-12 text-center text-slate-400 flex flex-col items-center justify-center gap-3">
+              <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+              <span className="text-xs font-semibold">جاري تحميل حالات الاسترداد...</span>
+            </div>
           ) : cases.length === 0 ? (
-            <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400">
-              لا توجد حالات استرداد مسجلة حتى الآن. سيبدأ النظام تلقائياً برصد أي مغادرة فور حدوثها في قناتك!
+            <div className="p-10 text-center bg-slate-900/90 border border-slate-800 rounded-2xl text-slate-400 space-y-2">
+              <p className="text-sm font-bold text-white">لا توجد حالات استرداد مسجلة حتى الآن</p>
+              <p className="text-xs text-slate-400">سيبدأ النظام تلقائياً برصد أي مغادرة فور حدوثها في قناتك ومراسلة العضو على الفور!</p>
             </div>
           ) : (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-right text-xs">
-                  <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
-                    <tr>
-                      <th className="p-3.5">العضو</th>
-                      <th className="p-3.5">القناة</th>
-                      <th className="p-3.5">الحالة</th>
-                      <th className="p-3.5">السبب المرصود</th>
-                      <th className="p-3.5">اليوزربوت</th>
-                      <th className="p-3.5">تاريخ المغادرة</th>
-                      <th className="p-3.5 text-center">المحادثة</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {cases
-                      .filter(c => {
-                        if (!searchQuery) return true;
-                        const s = searchQuery.toLowerCase();
-                        return (c.user_full_name && c.user_full_name.toLowerCase().includes(s)) ||
-                               (c.user_username && c.user_username.toLowerCase().includes(s)) ||
-                               c.telegram_user_id.includes(s);
-                      })
-                      .map((c) => (
-                        <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
-                          <td className="p-3.5 font-bold text-white">
-                            <div className="flex items-center gap-2">
-                              <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-emerald-400 text-xs font-bold">
-                                {(c.user_full_name || 'U')[0]}
-                              </div>
-                              <div>
-                                <span>{c.user_full_name || `مستخدم ${c.telegram_user_id.slice(-4)}`}</span>
-                                {c.user_username && (
-                                  <span className="block text-[10px] text-slate-400 font-mono font-normal">@{c.user_username}</span>
-                                )}
-                                {c.status === 'SCHEDULED' && (
-                                  <span className="block text-[10px] text-slate-500 font-medium mt-0.5">
-                                    في طابور الإرسال
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="p-3.5 text-slate-300 font-medium">{c.channel_title}</td>
-                          <td className="p-3.5">{getStatusBadge(c.status)}</td>
-                          <td className="p-3.5">
-                            {c.leave_reason_category ? (
-                              <div>
-                                <span className="font-semibold text-slate-200">{getReasonLabel(c.leave_reason_category)}</span>
-                                {c.leave_reason_raw && (
-                                  <span className="block text-[10px] text-slate-400 truncate max-w-xs italic">
-                                    "{c.leave_reason_raw}"
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-slate-500 italic">قيد التحليل...</span>
-                            )}
-                          </td>
-                          <td className="p-3.5 font-mono text-[11px] text-emerald-400">
-                            {c.assigned_userbot ? `@${c.assigned_userbot}` : 'تلقائي'}
-                          </td>
-                          <td className="p-3.5 text-slate-400 text-[11px]">
-                            {new Date(c.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
-                          </td>
-                          <td className="p-3.5 text-center">
-                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                              {/* Telegram Direct Link */}
-                              {c.direct_telegram_link ? (
-                                <a
-                                  href={c.direct_telegram_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold border border-emerald-500/20 transition-colors inline-flex items-center gap-1.5"
-                                  title="فتح المحادثة في تيليجرام"
-                                >
-                                  <Send className="w-3.5 h-3.5" />
-                                  <span>مراسلة مباشرة</span>
-                                </a>
+            <>
+              {/* MOBILE APP CARDS (Visible on mobile screens < 768px) */}
+              <div className="md:hidden space-y-2.5">
+                {cases
+                  .filter(c => {
+                    if (!searchQuery) return true;
+                    const s = searchQuery.toLowerCase();
+                    return (c.user_full_name && c.user_full_name.toLowerCase().includes(s)) ||
+                           (c.user_username && c.user_username.toLowerCase().includes(s)) ||
+                           c.telegram_user_id.includes(s);
+                  })
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-md space-y-2.5 transition-all active:border-emerald-500/40"
+                    >
+                      {/* Top Row: User Avatar & Info */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600/25 to-teal-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-sm shrink-0 shadow-sm">
+                            {(c.user_full_name || 'U')[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-xs sm:text-sm font-bold text-white truncate">
+                              {c.user_full_name || `مستخدم ${c.telegram_user_id.slice(-4)}`}
+                            </h4>
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
+                              {c.user_username ? (
+                                <span className="text-emerald-400 font-mono font-medium truncate">@{c.user_username}</span>
                               ) : (
-                                <a
-                                  href={c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors inline-flex items-center gap-1.5"
-                                  title="فتح المحادثة في تيليجرام"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                  <span>تيليجرام</span>
-                                </a>
+                                <span className="font-mono text-slate-500 text-[10px]">ID: {c.telegram_user_id}</span>
                               )}
-
-                              <button
-                                onClick={() => openCaseChat(c)}
-                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
-                                title="سجل المحادثة"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                                <span>المحادثة</span>
-                              </button>
-                              {c.status !== 'RECOVERED' && c.status !== 'CONTACTED' && c.status !== 'CONVERSATION_ACTIVE' && (
-                                <button
-                                  onClick={() => handleSendCaseNow(c.id)}
-                                  disabled={sendingCaseId === c.id}
-                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1 disabled:opacity-50"
-                                  title="إرسال الآن عبر اليوزربوت"
-                                >
-                                  <Send className="w-3 h-3" />
-                                  <span>{sendingCaseId === c.id ? 'إرسال...' : 'إرسال الآن'}</span>
-                                </button>
-                              )}
-                              {c.status === 'UNCONTACTABLE' && (
-                                <button
-                                  onClick={() => handleRetryCase(c.id)}
-                                  disabled={sendingCaseId === c.id}
-                                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-all inline-flex items-center gap-1"
-                                  title="إعادة التجهيز والمراسلة"
-                                >
-                                  <RefreshCw className="w-3 h-3" />
-                                  <span>إعادة ضبط</span>
-                                </button>
-                              )}
+                              <span>•</span>
+                              <span className="truncate max-w-[110px] text-slate-400">{c.channel_title}</span>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+
+                        <div className="text-left shrink-0">
+                          <span className="text-[10px] text-slate-400 font-mono block">
+                            {new Date(c.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {c.assigned_userbot && (
+                            <span className="text-[9px] text-emerald-400/90 font-mono block mt-0.5">
+                              @{c.assigned_userbot}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Status & Reasons Row */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-800/60">
+                        {getStatusBadge(c.status)}
+                        {c.leave_reason_category && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-950 text-slate-300 border border-slate-800">
+                            {getReasonLabel(c.leave_reason_category)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Touch Actions Bar */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => openCaseChat(c)}
+                          className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 active:scale-95 text-slate-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5 border border-slate-700/80 shadow-sm"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>محادثة مباشرة</span>
+                        </button>
+
+                        {c.status !== 'RECOVERED' && c.status !== 'CONTACTED' && c.status !== 'CONVERSATION_ACTIVE' ? (
+                          <button
+                            onClick={() => handleSendCaseNow(c.id)}
+                            disabled={sendingCaseId === c.id}
+                            className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-md shadow-emerald-950/60 disabled:opacity-50"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{sendingCaseId === c.id ? 'إرسال...' : 'إرسال الآن ⚡'}</span>
+                          </button>
+                        ) : (
+                          <a
+                            href={c.direct_telegram_link || (c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="py-2.5 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 active:scale-95 text-sky-400 text-xs font-bold border border-sky-500/30 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>تيليجرام</span>
+                          </a>
+                        )}
+
+                        {c.status === 'UNCONTACTABLE' && (
+                          <button
+                            onClick={() => handleRetryCase(c.id)}
+                            disabled={sendingCaseId === c.id}
+                            className="col-span-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-1.5"
+                          >
+                            <RefreshCw className="w-3 h-3 text-amber-400" />
+                            <span>إعادة ضبط المحاولة والمراسلة</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
               </div>
-            </div>
+
+              {/* DESKTOP TABLE (Visible on tablets and desktop >= 768px) */}
+              <div className="hidden md:block bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 font-semibold">
+                      <tr>
+                        <th className="p-3.5">العضو</th>
+                        <th className="p-3.5">القناة</th>
+                        <th className="p-3.5">الحالة</th>
+                        <th className="p-3.5">السبب المرصود</th>
+                        <th className="p-3.5">اليوزربوت</th>
+                        <th className="p-3.5">تاريخ المغادرة</th>
+                        <th className="p-3.5 text-center">المحادثة</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {cases
+                        .filter(c => {
+                          if (!searchQuery) return true;
+                          const s = searchQuery.toLowerCase();
+                          return (c.user_full_name && c.user_full_name.toLowerCase().includes(s)) ||
+                                 (c.user_username && c.user_username.toLowerCase().includes(s)) ||
+                                 c.telegram_user_id.includes(s);
+                        })
+                        .map((c) => (
+                          <tr key={c.id} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="p-3.5 font-bold text-white">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-emerald-400 text-xs font-bold">
+                                  {(c.user_full_name || 'U')[0]}
+                                </div>
+                                <div>
+                                  <span>{c.user_full_name || `مستخدم ${c.telegram_user_id.slice(-4)}`}</span>
+                                  {c.user_username && (
+                                    <span className="block text-[10px] text-slate-400 font-mono font-normal">@{c.user_username}</span>
+                                  )}
+                                  {c.status === 'SCHEDULED' && (
+                                    <span className="block text-[10px] text-slate-500 font-medium mt-0.5">
+                                      في طابور الإرسال
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3.5 text-slate-300 font-medium">{c.channel_title}</td>
+                            <td className="p-3.5">{getStatusBadge(c.status)}</td>
+                            <td className="p-3.5">
+                              {c.leave_reason_category ? (
+                                <div>
+                                  <span className="font-semibold text-slate-200">{getReasonLabel(c.leave_reason_category)}</span>
+                                  {c.leave_reason_raw && (
+                                    <span className="block text-[10px] text-slate-400 truncate max-w-xs italic">
+                                      "{c.leave_reason_raw}"
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic">قيد التحليل...</span>
+                              )}
+                            </td>
+                            <td className="p-3.5 font-mono text-[11px] text-emerald-400">
+                              {c.assigned_userbot ? `@${c.assigned_userbot}` : 'تلقائي'}
+                            </td>
+                            <td className="p-3.5 text-slate-400 text-[11px]">
+                              {new Date(c.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                            </td>
+                            <td className="p-3.5 text-center">
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                {c.direct_telegram_link ? (
+                                  <a
+                                    href={c.direct_telegram_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold border border-emerald-500/20 transition-colors inline-flex items-center gap-1.5"
+                                    title="فتح المحادثة في تيليجرام"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                    <span>مراسلة مباشرة</span>
+                                  </a>
+                                ) : (
+                                  <a
+                                    href={c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors inline-flex items-center gap-1.5"
+                                    title="فتح المحادثة في تيليجرام"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    <span>تيليجرام</span>
+                                  </a>
+                                )}
+
+                                <button
+                                  onClick={() => openCaseChat(c)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-colors inline-flex items-center gap-1.5"
+                                  title="سجل المحادثة"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>المحادثة</span>
+                                </button>
+                                {c.status !== 'RECOVERED' && c.status !== 'CONTACTED' && c.status !== 'CONVERSATION_ACTIVE' && (
+                                  <button
+                                    onClick={() => handleSendCaseNow(c.id)}
+                                    disabled={sendingCaseId === c.id}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors inline-flex items-center gap-1 disabled:opacity-50"
+                                    title="إرسال الآن عبر اليوزربوت"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>{sendingCaseId === c.id ? 'إرسال...' : 'إرسال الآن'}</span>
+                                  </button>
+                                )}
+                                {c.status === 'UNCONTACTABLE' && (
+                                  <button
+                                    onClick={() => handleRetryCase(c.id)}
+                                    disabled={sendingCaseId === c.id}
+                                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition-all inline-flex items-center gap-1"
+                                    title="إعادة التجهيز والمراسلة"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                    <span>إعادة ضبط</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -2030,7 +2189,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
             </div>
 
             {/* Manual Reply Input */}
-            <form onSubmit={handleSendManualMessage} className="p-3 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
+            <form onSubmit={handleSendManualMessage} className="p-3 pb-safe bg-slate-950 border-t border-slate-800 flex items-center gap-2">
               <input
                 type="text"
                 placeholder="اكتب رداً مخصصاً للعضو لإرساله عبر اليوزربوت..."

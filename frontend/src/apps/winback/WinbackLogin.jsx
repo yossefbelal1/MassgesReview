@@ -18,11 +18,11 @@ export default function WinbackLogin({ onSwitchToRegister }) {
     try {
       setLoading(true);
       setError('');
-      await login(email, password);
+      await login(email.trim(), password);
       // Ensure we navigate cleanly to the winback dashboard
       const isSubdomain = window.location.hostname.startsWith('winback') || window.location.hostname.startsWith('retention');
-      if (!isSubdomain && !window.location.pathname.startsWith('/winback') && !window.location.pathname.startsWith('/retention')) {
-        window.history.pushState({}, '', '/winback');
+      if (!isSubdomain && !window.location.pathname.startsWith('/winback')) {
+        window.location.href = '/winback';
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'البريد الإلكتروني أو كلمة المرور غير صحيحة');
