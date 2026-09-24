@@ -469,7 +469,7 @@ class DedicatedUserbotService:
                 "uncontactable_reason": "USER_BLOCKED_OR_DELETED",
                 "can_retry": False
             }
-        except (ValueError, TypeError) as val_err:
+        except (ValueError, TypeError, KeyError) as val_err:
             logger.info(f"[🛡️ Unresolvable Telegram Entity]: User {target_user_id} cannot be resolved by MTProto: {val_err}")
             return {
                 "success": False,

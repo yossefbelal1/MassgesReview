@@ -99,6 +99,14 @@ class RetentionEngine:
     def __init__(self):
         self._rr_index: int = 0
 
+    @staticmethod
+    def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     async def get_admin_client_for_channel(self, channel: Channel, default_client: TelegramClient) -> TelegramClient:
         """
         Finds a client that has admin rights to view the admin log of this channel.
@@ -871,13 +879,6 @@ class RetentionEngine:
             except (ValueError, TypeError):
                 access_hash = None
 
-        def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
-            if dt is None:
-                return None
-            if dt.tzinfo is None:
-                return dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-
         # Multi-account Load Balancing for the tenant
         tenant_userbots = db.query(ChannelUserbot).filter(
             ChannelUserbot.tenant_id == channel.tenant_id,
@@ -906,12 +907,24 @@ class RetentionEngine:
         ]
 
         if ready_userbots:
-            # Sort deterministically by ID so alternating round-robin is 50/50
-            ready_userbots.sort(key=lambda ub: ub.id)
-            chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
-            self._rr_index += 1
+            # Smart Routing:
+            # 1. If user has NO username but has access_hash, prioritize the userbot that discovered the entity (AutoMassge1 / primary).
+            # 2. If user HAS a username, round-robin 50/50 evenly across accounts.
+            chosen_userbot = None
+            if not username and access_hash:
+                hash_owner = next(
+                    (ub for ub in ready_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
+                    None
+                )
+                if hash_owner:
+                    chosen_userbot = hash_owner
 
-            logger.info(f"[⚖️ Multi-Account 50/50]: Dispatching case {case.id} via {chosen_userbot.phone} (@{chosen_userbot.username})")
+            if not chosen_userbot:
+                ready_userbots.sort(key=lambda ub: ub.id)
+                chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
+                self._rr_index += 1
+
+            logger.info(f"[⚖️ Userbot Dispatch]: Dispatching case {case.id} (user {case.telegram_user_id} @{username or 'no_user'}) via {chosen_userbot.phone} (@{chosen_userbot.username})")
 
             res = await dedicated_userbot_service.send_direct_message_for_channel(
                 db=db,
@@ -922,20 +935,33 @@ class RetentionEngine:
                 access_hash=access_hash,
                 userbot_id=chosen_userbot.id
             )
-            if not res["success"] and res.get("error") in ["CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD", "DAILY_QUOTA_REACHED", "ACCOUNT_COOLDOWN"]:
+
+            # If sending failed for any reason that can be recovered by an alternate userbot
+            failover_errors = [
+                "CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD",
+                "DAILY_QUOTA_REACHED", "ACCOUNT_COOLDOWN", "CANNOT_RESOLVE_PEER",
+                "PEER_ID_INVALID", "NO_USERNAME_OR_ACCESS_HASH"
+            ]
+            if not res.get("success") and (
+                res.get("error") in failover_errors or
+                res.get("uncontactable_reason") in ["NO_USERNAME_OR_ACCESS_HASH", "RPC_ERROR"]
+            ):
                 alternate_userbots = [ub for ub in ready_userbots if ub.id != chosen_userbot.id]
-                if alternate_userbots:
-                    logger.info(f"[🔄 Multi-Account Load Balance]: Failover to alternate userbot {alternate_userbots[0].phone}")
+                for alt_bot in alternate_userbots:
+                    logger.info(f"[🔄 Multi-Account Failover]: Attempting failover to alternate userbot {alt_bot.phone} (@{alt_bot.username}) for case {case.id}")
                     res = await dedicated_userbot_service.send_direct_message_for_channel(
                         db=db,
-                        channel_id=alternate_userbots[0].channel_id,
+                        channel_id=alt_bot.channel_id,
                         target_user_id=int(case.telegram_user_id),
                         text=outbound_text,
                         target_username=username,
                         access_hash=access_hash,
-                        userbot_id=alternate_userbots[0].id
+                        userbot_id=alt_bot.id
                     )
-                else:
+                    if res.get("success"):
+                        break
+
+                if not res.get("success") and not alternate_userbots:
                     logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
                     res = await userbot_pool.send_direct_message(
                         target_user_id=int(case.telegram_user_id),

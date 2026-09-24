@@ -599,6 +599,11 @@ async def send_case_now_direct(
     if not case:
         raise HTTPException(status_code=404, detail="حالة الاستعادة غير موجودة")
 
+    if case.status == "UNCONTACTABLE":
+        case.contactable = True
+        case.uncontactable_reason = None
+        db.commit()
+
     res = await retention_engine.send_recovery_to_case(db, case)
     db.refresh(case)
     return {
