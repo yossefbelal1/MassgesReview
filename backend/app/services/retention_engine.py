@@ -975,6 +975,26 @@ class RetentionEngine:
                         break
 
                 if not res.get("success") and not alternate_userbots:
+                    if res.get("error") == "CANNOT_RESOLVE_PEER" and access_hash:
+                        hash_owner = next(
+                            (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
+                            None
+                        )
+                        if hash_owner and hash_owner.cooldown_until:
+                            cd = self._to_utc(hash_owner.cooldown_until)
+                            if cd and cd > now:
+                                case.scheduled_contact_at = cd
+                                case.status = "SCHEDULED"
+                                case.contactable = True
+                                case.uncontactable_reason = None
+                                db.commit()
+                                logger.info(f"[⏳ Case Queued for Hash Owner]: Case {case.id} delayed until {cd} for {hash_owner.username}")
+                                return {
+                                    "success": False,
+                                    "error_code": "WAITING_FOR_HASH_OWNER",
+                                    "error": f"المستخدم يحتاج الحساب الأساسي ({hash_owner.username})، ستتم المراسلة تلقائياً عند انتهاء فترة الراحة."
+                                }
+
                     logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
                     res = await userbot_pool.send_direct_message(
                         target_user_id=int(case.telegram_user_id),
@@ -1079,6 +1099,10 @@ class RetentionEngine:
                 if res.get("success"):
                     sent_count += 1
                     await asyncio.sleep(pacing_delay)
+                elif res.get("error_code") == "WAITING_FOR_HASH_OWNER":
+                    # Case successfully queued for hash owner; continue to next member in queue
+                    await asyncio.sleep(0.5)
+                    continue
                 elif res.get("error_code") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"] or \
                      res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"]:
                     logger.info(f"[⚠️ Outreach Paused for tenant {tenant.id}]: {res.get('error_code') or res.get('error')}")
