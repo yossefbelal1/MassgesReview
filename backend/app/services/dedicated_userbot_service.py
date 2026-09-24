@@ -349,7 +349,12 @@ class DedicatedUserbotService:
         """
         query = db.query(ChannelUserbot).filter(ChannelUserbot.is_active == True)
         if userbot_id:
-            userbot = query.filter(ChannelUserbot.id == userbot_id).first()
+            clean_id = str(userbot_id).strip()
+            userbot = query.filter(
+                (ChannelUserbot.id == clean_id) |
+                (ChannelUserbot.username == clean_id.lstrip('@')) |
+                (ChannelUserbot.phone == clean_id)
+            ).first()
         else:
             userbot = query.filter(ChannelUserbot.channel_id == channel_id).first()
 
@@ -756,9 +761,9 @@ class DedicatedUserbotService:
             logger.error(f"[SpamBot Auto-Healer Error for {bot_label}]: {e}")
             return False, str(e), None
 
-    async def upload_userbot_avatar(self, db: Session, channel_id: str, image_bytes: bytes) -> Dict[str, Any]:
+    async def upload_userbot_avatar(self, db: Session, channel_id: str, image_bytes: bytes, userbot_id: Optional[str] = None) -> Dict[str, Any]:
         """Uploads and changes profile picture of channel's dedicated userbot."""
-        client = await self.get_client_for_channel(db, channel_id)
+        client = await self.get_client_for_channel(db, channel_id, userbot_id=userbot_id)
         if not client:
             raise HTTPException(status_code=400, detail="يوزربوت القناة غير متصل حالياً.")
 
@@ -771,28 +776,33 @@ class DedicatedUserbotService:
             await client(UploadProfilePhotoRequest(file=uploaded))
             return {"success": True, "message": "تم تحديث صورة بروفايل اليوزربوت على تيليجرام بنجاح! 🎉"}
         except Exception as e:
-            logger.error(f"Failed to upload userbot avatar for channel {channel_id}: {e}")
+            logger.error(f"Failed to upload userbot avatar: {e}")
             raise HTTPException(status_code=500, detail=f"فشل رفع الصورة: {str(e)}")
 
-    async def disconnect_userbot(self, db: Session, tenant_id: str, channel_id: str) -> Dict[str, Any]:
-        """Removes dedicated userbot for channel."""
-        userbot = db.query(ChannelUserbot).filter(
-            ChannelUserbot.channel_id == channel_id,
-            ChannelUserbot.tenant_id == tenant_id
-        ).first()
+    async def disconnect_userbot(self, db: Session, tenant_id: str, channel_id: Optional[str] = None, userbot_id: Optional[str] = None) -> Dict[str, Any]:
+        """Removes dedicated userbot for channel or by userbot_id."""
+        query = db.query(ChannelUserbot).filter(ChannelUserbot.tenant_id == tenant_id)
+        if userbot_id:
+            userbot = query.filter(ChannelUserbot.id == userbot_id).first()
+        elif channel_id:
+            userbot = query.filter(ChannelUserbot.channel_id == channel_id).first()
+        else:
+            raise HTTPException(status_code=400, detail="يجب تحديد معرف اليوزربوت أو القناة.")
 
         if not userbot:
-            raise HTTPException(status_code=404, detail="لا يوجد يوزربوت مخصص مرتبط بهذه القناة.")
+            raise HTTPException(status_code=404, detail="لا يوجد يوزربوت مخصص مطابق.")
 
-        if channel_id in self._clients:
-            try:
-                await self._clients[channel_id].disconnect()
-            except Exception:
-                pass
-            del self._clients[channel_id]
+        for key in [userbot.id, userbot.channel_id]:
+            if key and key in self._clients:
+                try:
+                    await self._clients[key].disconnect()
+                except Exception:
+                    pass
+                self._clients.pop(key, None)
 
+        phone = userbot.phone
         db.delete(userbot)
         db.commit()
-        return {"success": True, "message": "تم فصل اليوزربوت عن القناة بنجاح. ستعمل القناة الآن عبر المجمع العام."}
+        return {"success": True, "message": f"تم فصل الرقم ({phone}) بنجاح."}
 
 dedicated_userbot_service = DedicatedUserbotService()

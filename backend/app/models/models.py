@@ -117,7 +117,7 @@ class Channel(Base):
     retention_setting = relationship("RetentionSetting", back_populates="channel", uselist=False, cascade="all, delete-orphan")
     audience_members = relationship("AudienceMember", back_populates="channel", cascade="all, delete-orphan")
     recovery_cases = relationship("RecoveryCase", back_populates="channel", cascade="all, delete-orphan")
-    userbot = relationship("ChannelUserbot", back_populates="channel", uselist=False, cascade="all, delete-orphan")
+    channel_userbots = relationship("ChannelUserbot", back_populates="channel", cascade="all, delete-orphan")
     login_attempts = relationship("UserbotLoginAttempt", back_populates="channel", cascade="all, delete-orphan")
     invite_links = relationship("InviteLink", back_populates="channel", cascade="all, delete-orphan")
     membership_events = relationship("MembershipEvent", back_populates="channel", cascade="all, delete-orphan")
@@ -396,7 +396,7 @@ class ChannelUserbot(Base):
     )
 
     tenant = relationship("Tenant", back_populates="channel_userbots")
-    channel = relationship("Channel", back_populates="userbot")
+    channel = relationship("Channel", back_populates="channel_userbots")
 
 
 class UserbotLoginAttempt(Base):

@@ -5,7 +5,7 @@ import {
   Clock, Sparkles, Filter, Search, ArrowUpRight, Send, AlertCircle, 
   Settings, BarChart3, Bot, ChevronLeft, X, ExternalLink, Radio, MessageCircle,
   Camera, Upload, Eye, Check, Copy, HelpCircle, Key, Phone, ShieldCheck, ChevronDown, ChevronUp, Trash2, Power, Zap,
-  Target, PieChart, TrendingUp, Activity
+  Target, PieChart, TrendingUp, Activity, PlusCircle, Lock, Smartphone
 } from 'lucide-react';
 
 const WINBACK_TEMPLATES = [
@@ -89,18 +89,19 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     }, 4500);
   };
 
-  // Dedicated Userbot State
+  // Dedicated Userbot & Multi-bot Fleet State
   const [dedicatedUserbot, setDedicatedUserbot] = useState(null);
-  const [userbotForm, setUserbotForm] = useState({ api_id: '', api_hash: '', phone: '' });
+  const [userbotForm, setUserbotForm] = useState({ api_id: '', api_hash: '', phone: '', channel_id: '' });
   const [useCustomApi, setUseCustomApi] = useState(false);
-  const [userbotStep, setUserbotStep] = useState(1); // 1 = enter credentials, 2 = verify OTP/2FA
+  const [userbotStep, setUserbotStep] = useState(1); // 1 = API selection / guide, 2 = Phone & Channel, 3 = Verify OTP, 4 = 2FA, 5 = Success
+  const [showAddUserbotModal, setShowAddUserbotModal] = useState(false);
   const [loginAttemptId, setLoginAttemptId] = useState('');
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyPassword, setVerifyPassword] = useState('');
   const [needs2fa, setNeeds2fa] = useState(false);
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
-  const [showTelegramGuide, setShowTelegramGuide] = useState(false);
+  const [connectedUserbotSuccess, setConnectedUserbotSuccess] = useState(null);
 
   // Settings Form State
   const [savingSettings, setSavingSettings] = useState(false);
@@ -225,7 +226,8 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
   const handleRequestUserbotCode = async (e) => {
     e.preventDefault();
-    if (!selectedChannelId) {
+    const chId = userbotForm.channel_id || selectedChannelId || channels[0]?.id;
+    if (!chId) {
       showToast('يرجى اختيار القناة أولاً لربط اليوزربوت بها.', 'error');
       return;
     }
@@ -241,7 +243,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     try {
       setSendingOtp(true);
       const payload = {
-        channel_id: selectedChannelId,
+        channel_id: chId,
         phone: userbotForm.phone.trim()
       };
       if (useCustomApi && userbotForm.api_id) {
@@ -253,7 +255,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
       const res = await apiClient.post('/retention/userbot/request-code', payload);
       setLoginAttemptId(res.data.login_attempt_id);
-      setUserbotStep(2);
+      setUserbotStep(3);
       setNeeds2fa(false);
       setVerifyCode('');
       setVerifyPassword('');
@@ -266,8 +268,8 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
   };
 
   const handleVerifyUserbotCode = async (e) => {
-    e.preventDefault();
-    if (!verifyCode.trim()) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (userbotStep === 3 && !verifyCode.trim()) {
       showToast('يرجى إدخال كود التحقق المستلم في تطبيق تيليجرام.', 'error');
       return;
     }
@@ -282,17 +284,19 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
       if (res.data.needs_2fa) {
         setNeeds2fa(true);
+        setUserbotStep(4);
         showToast(res.data.message || 'حسابك محمي بالتحقق بخطوتين (2FA). يرجى إدخال كلمة المرور السحابية.', 'error');
         return;
       }
 
       showToast(res.data.message || 'تم ربط الحساب بنجاح! 🎉', 'success');
-      setUserbotStep(1);
-      setUserbotForm({ api_id: '', api_hash: '', phone: '' });
-      setVerifyCode('');
-      setVerifyPassword('');
-      setNeeds2fa(false);
-      fetchData();
+      setConnectedUserbotSuccess(res.data.userbot || {
+        first_name: 'يوزربوت تيليجرام',
+        phone: userbotForm.phone,
+        username: ''
+      });
+      setUserbotStep(5);
+      fetchData(true);
     } catch (err) {
       showToast('فشل التحقق: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
@@ -300,18 +304,33 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     }
   };
 
-  const handleDisconnectDedicatedUserbot = async (targetChannelId = null) => {
-    const chId = targetChannelId || selectedChannelId;
-    if (!chId) return;
-    if (!window.confirm('هل أنت متأكد من فصل هذا الحساب عن القناة؟')) {
+  const resetUserbotWizard = () => {
+    setUserbotStep(1);
+    setUseCustomApi(false);
+    setUserbotForm({ api_id: '', api_hash: '', phone: '', channel_id: selectedChannelId || channels[0]?.id || '' });
+    setVerifyCode('');
+    setVerifyPassword('');
+    setNeeds2fa(false);
+    setLoginAttemptId('');
+    setConnectedUserbotSuccess(null);
+  };
+
+  const handleDisconnectDedicatedUserbot = async (userbotId = null, targetChannelId = null) => {
+    if (!window.confirm('هل أنت متأكد من فصل هذا الحساب عن نظام المراسلة؟')) {
       return;
     }
 
     try {
       setActionLoading(true);
-      const res = await apiClient.delete(`/retention/userbot/${chId}`);
+      let res;
+      if (userbotId) {
+        res = await apiClient.delete(`/retention/userbots/${userbotId}`);
+      } else {
+        const chId = targetChannelId || selectedChannelId;
+        res = await apiClient.delete(`/retention/userbot/${chId}`);
+      }
       showToast(res.data?.message || 'تم فصل الحساب بنجاح.', 'success');
-      if (chId === selectedChannelId) {
+      if (targetChannelId === selectedChannelId || !userbotId) {
         setDedicatedUserbot(null);
       }
       fetchData();
@@ -322,9 +341,9 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     }
   };
 
-  const handleDedicatedAvatarUpload = async (e) => {
+  const handleDedicatedAvatarUpload = async (e, targetUserbotId = null) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedChannelId) return;
+    if (!file) return;
 
     if (!file.type.startsWith('image/')) {
       showToast('يرجى اختيار ملف صورة صالح (JPEG أو PNG)', 'error');
@@ -341,12 +360,15 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
     try {
       setUploadingAvatar(true);
-      const res = await apiClient.post(`/retention/userbot/${selectedChannelId}/avatar`, formData, {
+      const endpoint = targetUserbotId 
+        ? `/retention/userbots/${targetUserbotId}/avatar` 
+        : `/retention/userbot/${selectedChannelId}/avatar`;
+      const res = await apiClient.post(endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       showToast(res.data?.message || 'تم تحديث صورة بروفايل اليوزربوت بنجاح! 🎉', 'success');
       setAvatarTimestamp(Date.now());
-      fetchData();
+      fetchData(true);
     } catch (err) {
       showToast('فشل رفع الصورة: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
@@ -2275,411 +2297,719 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
       {/* ── TAB 5: USERBOT FLEET & DEDICATED ONBOARDING ──────────────────── */}
       {activeTab === 'userbots' && (
-        <div className="space-y-6 max-w-4xl">
-          {/* SECTION 1: DEDICATED CHANNEL USERBOT */}
-          <div className="p-5 sm:p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
-                    حساب القناة المخصص
-                  </span>
-                  <span className="text-xs text-slate-400">قناة: <strong className="text-white font-bold">{getSelectedChannelTitle()}</strong></span>
-                </div>
-                <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                  <Bot className="w-5 h-5 text-emerald-400" />
-                  <span>اليوزربوت المخصص لإرسال رسائل القناة</span>
-                </h3>
+        <div className="space-y-6 max-w-5xl" dir="rtl">
+          {/* Header & Add Button Bar */}
+          <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>أسطول المراسلة ونظام توزيع الحمل</span>
+                </span>
+                <span className="text-xs text-slate-400">
+                  قناة: <strong className="text-white font-bold">{getSelectedChannelTitle()}</strong>
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2.5">
+                <Bot className="w-6 h-6 text-emerald-400" />
+                <span>حسابات تيليجرام المتصلة (اليوزربوت)</span>
+              </h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                اربط أرقام تيليجرام متعددة للمتابعة التلقائية وتوزيع طابور المغادرين بالتناوب العادل (Round-Robin) مع ضمان عدم تكرار المراسلة لنفس العضو من أكثر من حساب.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                resetUserbotWizard();
+                setShowAddUserbotModal(true);
+              }}
+              className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2 transition-all transform hover:-translate-y-0.5 shrink-0"
+            >
+              <PlusCircle className="w-5 h-5" />
+              <span>إضافة رقم تيليجرام جديد 📲</span>
+            </button>
+          </div>
+
+          {/* Quick Stats & Guarantees Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 block">إجمالي الأرقام المتصلة</span>
+              <div className="text-xl font-black text-white font-mono flex items-center gap-2">
+                <Smartphone className="w-5 h-5 text-emerald-400" />
+                <span>{userbots.length}</span>
+                <span className="text-[10px] text-slate-500 font-normal">أرقام</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 block">الحسابات الجاهزة للإرسال</span>
+              <div className="text-xl font-black text-emerald-400 font-mono flex items-center gap-2">
+                <Zap className="w-5 h-5 text-amber-400" />
+                <span>{userbots.filter(b => b.is_healthy && !b.in_cooldown).length}</span>
+                <span className="text-[10px] text-emerald-400/70 font-normal">نشط</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 block">نظام التناوب (Round-Robin)</span>
+              <div className="text-xs font-bold text-blue-400 flex items-center gap-1.5 pt-1">
+                <RefreshCw className="w-4 h-4 text-blue-400" />
+                <span>مفعّل تلقائياً ⚡</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+              <span className="text-[11px] text-slate-400 block">ضمان المرسل الوحيد</span>
+              <div className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 pt-1">
+                <Lock className="w-4 h-4 text-emerald-400" />
+                <span>مُقفل 100% 🔒</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Golden Rules Banner (Single Messenger & Safety) */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+            <h4 className="text-xs font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>قواعد الأمان وتوزيع الحمل الذكي (Smart Multi-Userbot Engine)</span>
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-300">
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                <strong className="text-emerald-400 block font-bold flex items-center gap-1">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>1. التناوب العادل (Round-Robin)</span>
+                </strong>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  يتم توزيع طابور المغادرين بالتناوب المتساوي بين جميع أرقامك النشطة لمضاعفة سرعة الإرسال دون إجهاد أي حساب.
+                </p>
               </div>
 
-              {dedicatedUserbot ? (
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 self-start sm:self-center">
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>مربوط ومتصل بالقناة 🟢</span>
-                </span>
-              ) : (
-                <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1.5 self-start sm:self-center">
-                  <AlertCircle className="w-4 h-4" />
-                  <span>غير مربوط بعد (يعمل عبر المجمع العام)</span>
-                </span>
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                <strong className="text-blue-400 block font-bold flex items-center gap-1">
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>2. ضمان المرسل الوحيد</span>
+                </strong>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  مستحيل أن يتلقى أي عميل رسائل من رقمين مختلفين؛ العميل الذي يبدأ معه رقم معين يظل مرتبطاً به حصرياً في كل المتابعات والردود.
+                </p>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1">
+                <strong className="text-amber-400 block font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>3. الحماية والتحويل الفوري</span>
+                </strong>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  فواصل زمنية مدروسة وحد يومي آمن (35 رسالة/رقم)، مع تحويل تلقائي للحالات الجديدة للأرقام الأخرى إذا دخل أي رقم في راحة مؤقتة.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Connected Userbots Cards Grid */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-400" />
+                <span>الأرقام المتصلة بالنظام حالياً ({userbots.length})</span>
+              </h3>
+              {userbots.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => fetchData(true)}
+                  className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>تحديث الحالة</span>
+                </button>
               )}
             </div>
 
-            {/* IF DEDICATED USERBOT IS CONNECTED */}
-            {dedicatedUserbot ? (
-              <div className="space-y-4">
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-emerald-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 rounded-2xl bg-emerald-600/20 border-2 border-emerald-500/30 flex items-center justify-center text-emerald-400 font-extrabold text-lg shrink-0 overflow-hidden shadow-inner">
-                      {dedicatedUserbot.first_name ? dedicatedUserbot.first_name.slice(0, 2).toUpperCase() : '🤖'}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-sm font-bold text-white">{dedicatedUserbot.first_name || 'يوزربوت القناة'}</h4>
-                        {dedicatedUserbot.username && (
-                          <span className="text-xs text-slate-400 font-mono">@{dedicatedUserbot.username}</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-slate-400 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <Phone className="w-3.5 h-3.5 text-slate-500" />
-                          <span className="font-mono">{dedicatedUserbot.phone}</span>
-                        </span>
-                        <span className="text-slate-600">•</span>
-                        <span>تم إرسال <strong className="text-white">{dedicatedUserbot.daily_contacts_count}</strong> من 35 رسالة اليوم</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-stretch sm:self-center justify-end">
-                    <label className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 border border-slate-700">
-                      <Upload className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>{uploadingAvatar ? 'جاري الرفع...' : 'تغيير الصورة 📷'}</span>
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        disabled={uploadingAvatar}
-                        onChange={handleDedicatedAvatarUpload}
-                      />
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={handleDisconnectDedicatedUserbot}
-                      disabled={actionLoading}
-                      className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold transition-all flex items-center gap-1.5"
-                      title="فصل هذا الحساب عن القناة"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>فصل الحساب</span>
-                    </button>
-                  </div>
+            {userbots.length === 0 ? (
+              <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-4">
+                <div className="w-16 h-16 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+                  <Bot className="w-8 h-8" />
                 </div>
-
-                <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>أي عضو يغادر قناة <strong>{getSelectedChannelTitle()}</strong> تصله رسالة الاسترداد من هذا الحساب المخصص مباشرة وباسم قناتك!</span>
+                <div className="max-w-md mx-auto space-y-1">
+                  <h4 className="text-base font-bold text-white">لا توجد أرقام تيليجرام مربوطة حتى الآن</h4>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    ابدأ الآن بربط أول رقم تيليجرام خاص بك بخطوات بسيطة لتبدأ مراسلة الأعضاء المغادرين فوراً وباسم قناتك.
+                  </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetUserbotWizard();
+                    setShowAddUserbotModal(true);
+                  }}
+                  className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg inline-flex items-center gap-2 transition-all"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>إضافة أول رقم تيليجرام الآن</span>
+                </button>
               </div>
             ) : (
-              /* IF NOT CONNECTED -> ONBOARDING WIZARD & GUIDE */
-              <div className="space-y-5">
-                {/* Motivation Box */}
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-950 to-slate-900 border border-emerald-500/20 flex items-start gap-3 text-xs leading-relaxed text-slate-300">
-                  <Sparkles className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="block text-emerald-400 font-bold mb-1">لماذا ننصح بربط يوزربوت خاص بقناتك؟</strong>
-                    <p className="text-slate-300">
-                      عندما يخرج العضو من قناتك، تصله رسالة المتابعة والاسترداد من حساب يحمل اسم وصورة قناتك مباشرة، مما يرفع نسبة الاسترداد والردود بأكثر من <strong>40%</strong>، بالإضافة إلى حصولك على حصة مراسلات يومية مستقلة بالكامل.
-                    </p>
-                  </div>
-                </div>
-
-                {/* WIZARD STEP 1: ENTER PHONE NUMBER (QUICK CONNECT) */}
-                {userbotStep === 1 && (
-                  <form onSubmit={handleRequestUserbotCode} className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <span className="text-xs font-bold text-white flex items-center gap-2">
-                        <Key className="w-4 h-4 text-emerald-400" />
-                        <span>الخطوة 1 من 2: إدخال رقم الهاتف للربط المباشر</span>
-                      </span>
-                      <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-bold">⚡ ربط فوري برقم الهاتف</span>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 space-y-1">
-                      <strong className="block text-white font-bold flex items-center gap-1.5">
-                        <Zap className="w-4 h-4 text-amber-400" />
-                        <span>ربط فوري وسريع برقم هاتفك:</span>
-                      </strong>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">
-                        اكتب رقم تيليجرام الخاص بك بصيغته الدولية الكاملة، وسنرسل لك كود تحقق سري داخل تطبيق تيليجرام لتأكيد ربط الحساب بالقناة وإرسال الرسائل فوراً للأعضاء المغادرين دون أي توقف!
-                      </p>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          رقم هاتف حساب التيليجرام (بصيغته الدولية الكاملة) <span className="text-rose-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="مثال: +966501234567 أو +201012345678"
-                          value={userbotForm.phone}
-                          onChange={(e) => setUserbotForm({ ...userbotForm, phone: e.target.value })}
-                          required
-                          className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm font-mono outline-none focus:border-emerald-500"
-                        />
-                        <span className="text-[10px] text-slate-500 mt-1 block">تأكد من كتابة كود الدولة مسبوقاً بعلامة +، وسيصلك كود التأكيد في تطبيق تيليجرام على هذا الرقم مباشرة.</span>
-                      </div>
-
-                      {/* Advanced custom API ID / HASH toggle */}
-                      <div className="pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setUseCustomApi(!useCustomApi)}
-                          className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 transition-colors cursor-pointer"
-                        >
-                          <Settings className="w-3.5 h-3.5" />
-                          <span>{useCustomApi ? 'إخفاء الإعدادات المتقدمة (استخدام مفاتيح النظام الافتراضية)' : '⚙️ إعدادات متقدمة للمطورين (اختياري: كتابة API ID و API HASH مخصص)'}</span>
-                        </button>
-
-                        {useCustomApi && (
-                          <div className="mt-3 p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-4 animate-in fade-in">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                  App API ID (أرقام فقط)
-                                </label>
-                                <input
-                                  type="number"
-                                  placeholder="مثال: 29482710"
-                                  value={userbotForm.api_id}
-                                  onChange={(e) => setUserbotForm({ ...userbotForm, api_id: e.target.value })}
-                                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
-                                />
-                              </div>
-
-                              <div>
-                                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                                  App API HASH (نص رموز وحروف)
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="مثال: a1b2c3d4e5f6g7h8i9j0..."
-                                  value={userbotForm.api_hash}
-                                  onChange={(e) => setUserbotForm({ ...userbotForm, api_hash: e.target.value })}
-                                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
-                                />
-                              </div>
-                            </div>
-
-                            {/* GUIDE ACCORDION: How to get API ID and API HASH */}
-                            <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950 p-3.5 space-y-3">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-bold text-emerald-400">
-                                  📘 استخراج API ID من my.telegram.org
-                                </span>
-                                <a
-                                  href="https://my.telegram.org"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                  <span>فتح my.telegram.org ↗</span>
-                                </a>
-                              </div>
-                              <p className="text-[10px] text-slate-400 leading-normal">
-                                ادخل على موقع my.telegram.org برقم هاتفك، اضغط على API development tools، اكتب أي اسم بالإنجليزية للتطبيق وانسخ الـ API ID والـ API HASH وضعهما في الحقول أعلاه.
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-2 flex justify-end">
-                      <button
-                        type="submit"
-                        disabled={sendingOtp}
-                        className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
-                      >
-                        {sendingOtp ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>جاري إرسال كود التحقق إلى تيليجرام...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Send className="w-4 h-4" />
-                            <span>إرسال كود التحقق لتطبيق تيليجرام 📲</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                {/* WIZARD STEP 2: VERIFY OTP AND 2FA */}
-                {userbotStep === 2 && (
-                  <form onSubmit={handleVerifyUserbotCode} className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-emerald-500/30 space-y-4 animate-in fade-in zoom-in-95">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>الخطوة 2 من 2: تأكيد كود التحقق</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setUserbotStep(1)}
-                        className="text-xs text-slate-400 hover:text-white underline"
-                      >
-                        تعديل البيانات ↩
-                      </button>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
-                      تم إرسال كود التحقق بنجاح إلى تطبيق تيليجرام الخاص بالرقم: <strong className="font-mono text-white">{userbotForm.phone}</strong>. يرجى كتابة الكود بالأسفل.
-                    </div>
-
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 mb-1">
-                          كود التحقق المستلم (OTP) <span className="text-rose-400">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="مثال: 54321"
-                          value={verifyCode}
-                          onChange={(e) => setVerifyCode(e.target.value)}
-                          required
-                          autoFocus
-                          className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm font-mono text-center tracking-widest outline-none focus:border-emerald-500 font-bold"
-                        />
-                      </div>
-
-                      {(needs2fa || true) && (
-                        <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
-                            <span>كلمة مرور التحقق بخطوتين (2FA Cloud Password)</span>
-                            <span className="text-[10px] text-slate-500 font-normal">(مطلوبة فقط إذا كان حسابك مفعلاً بكلمة سر سحابية)</span>
-                          </label>
-                          <input
-                            type="password"
-                            placeholder="اكتب كلمة السر هنا إذا كان حسابك محمياً بـ 2FA..."
-                            value={verifyPassword}
-                            onChange={(e) => setVerifyPassword(e.target.value)}
-                            className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500"
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-2 flex items-center justify-between">
-                      <button
-                        type="button"
-                        onClick={() => setUserbotStep(1)}
-                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all"
-                      >
-                        إلغاء / رجوع
-                      </button>
-
-                      <button
-                        type="submit"
-                        disabled={verifyingOtp}
-                        className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
-                      >
-                        {verifyingOtp ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>جاري التحقق وإنشاء الجلسة...</span>
-                          </>
-                        ) : (
-                          <>
-                            <ShieldCheck className="w-4 h-4" />
-                            <span>تأكيد وربط الحساب الآن 🚀</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 2: CONNECTED ACCOUNTS & LOAD BALANCING */}
-          <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                  <span>حساباتك المتصلة ونظام توزيع الحمل (Load Balancing)</span>
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  توزيع رسائل المتابعة بالتساوي بين حساباتك لمضاعفة سرعة الإرسال وإنهاء طابور المغادرين فوراً بأمان.
-                </p>
-              </div>
-              <span className="text-xs text-slate-400 font-semibold">
-                {userbots.filter(b => b.is_healthy).length} حساب نشط
-              </span>
-            </div>
-
-            {/* Load Balancing status banner */}
-            {userbots.length >= 2 ? (
-              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2.5">
-                <Zap className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
-                <span>
-                  <strong>توزيع الحمل نشط ومفعّل ⚡:</strong> يتم توزيع طابور المغادرين بالتناوب بين <strong>{userbots.length} حسابات</strong> لمضاعفة سرعة الإرسال مرتين مع الحفاظ على الأمان الكامل ضد الحظر!
-                </span>
-              </div>
-            ) : userbots.length === 1 ? (
-              <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 flex items-center gap-2.5">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  <strong>حسابك الخاص متصل وجاهز!</strong> لمضاعفة السرعة وإنهاء أي طابور في نصف الوقت، يمكنك اختيار قناة أخرى من القائمة العلوية وربط رقم ثانٍ لتفعيل نظام توزيع الحمل التلقائي.
-                </span>
-              </div>
-            ) : (
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 text-center">
-                لا توجد حسابات مخصصة مربوطة حتى الآن. استخدم النموذج أعلاه لربط أول رقم تيليجرام خاص بك.
-              </div>
-            )}
-
-            {/* Connected Userbots List */}
-            {userbots.length > 0 && (
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {userbots.map((b, i) => (
-                  <div key={i} className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold shrink-0">
-                        <Bot className="w-5 h-5 text-emerald-400" />
+                  <div key={b.id || i} className="p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all space-y-4 shadow-sm">
+                    {/* Top Row: Avatar & Identity */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3.5">
+                        <div className="relative group">
+                          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600/30 to-slate-800 border-2 border-emerald-500/30 flex items-center justify-center text-emerald-400 font-black text-base shrink-0 shadow-inner overflow-hidden">
+                            {b.first_name ? b.first_name.slice(0, 2).toUpperCase() : '🤖'}
+                          </div>
+                          {/* Quick change photo badge on avatar */}
+                          <label className="absolute -bottom-1 -right-1 p-1 rounded-full bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white border border-slate-700 cursor-pointer transition-all shadow-md" title="تغيير صورة البروفايل على تيليجرام">
+                            <Camera className="w-3 h-3" />
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              disabled={uploadingAvatar}
+                              onChange={(e) => handleDedicatedAvatarUpload(e, b.id)}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-white">{b.first_name || 'حساب تيليجرام'}</h4>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+                              {b.channel_title}
+                            </span>
+                          </div>
+                          {b.username ? (
+                            <a
+                              href={`https://t.me/${b.username}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-slate-400 hover:text-emerald-400 font-mono flex items-center gap-1 transition-colors"
+                            >
+                              <span>@{b.username}</span>
+                              <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-slate-500">بدون معرف</span>
+                          )}
+                          <div className="text-xs text-slate-300 font-mono font-bold flex items-center gap-1 pt-0.5">
+                            <Phone className="w-3 h-3 text-slate-500" />
+                            <span>{b.phone}</span>
+                          </div>
+                        </div>
                       </div>
 
+                      {/* Status Badge */}
                       <div>
-                        <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                          <span className="font-mono">{b.phone}</span>
-                          {b.username && (
-                            <span className="text-[11px] text-slate-400 font-mono">@{b.username}</span>
-                          )}
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-semibold border border-emerald-500/20">
-                            {b.channel_title}
+                        {b.in_cooldown ? (
+                          <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            <span>راحة مؤقتة ⏳</span>
                           </span>
-                        </h4>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[11px] text-slate-400">
-                            تم إرسال <strong className="text-white font-mono">{b.daily_contacts_sent}</strong> من {b.max_daily_contacts} رسالة اليوم
+                        ) : b.is_healthy ? (
+                          <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>متصل ونشط 🟢</span>
                           </span>
-                          {b.in_cooldown && (
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 font-semibold">
-                              انتظار مؤقت
-                            </span>
-                          )}
-                        </div>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>يحتاج إعادة ربط 🔴</span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-center">
-                      <span className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
-                        b.is_healthy ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                      }`}>
-                        {b.is_healthy ? 'متصل وجاهز 🟢' : 'يحتاج فحص 🔴'}
-                      </span>
+                    {/* Middle: Daily Quota & Usage Bar */}
+                    <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400">حصة المراسلات اليومية</span>
+                        <span className="font-mono text-white font-bold">
+                          {b.daily_contacts_sent} / {b.max_daily_contacts} رسالة
+                        </span>
+                      </div>
+                      {/* Progress bar */}
+                      <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            (b.daily_contacts_sent || 0) >= 30 ? 'bg-amber-500' : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(100, ((b.daily_contacts_sent || 0) / b.max_daily_contacts) * 100)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+                        <span>مشارك في التناوب التلقائي 🔄</span>
+                        {b.in_cooldown ? (
+                          <span className="text-amber-400 font-bold">حماية تيليجرام نشطة مؤقتاً</span>
+                        ) : (
+                          <span className="text-emerald-400">جاهز لاستلام حالات جديدة</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Bottom Action Buttons */}
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                      <label className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 border border-slate-700">
+                        <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>{uploadingAvatar ? 'جاري الرفع...' : 'تغيير الصورة 📷'}</span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          className="hidden"
+                          disabled={uploadingAvatar}
+                          onChange={(e) => handleDedicatedAvatarUpload(e, b.id)}
+                        />
+                      </label>
 
                       <button
                         type="button"
-                        onClick={() => handleDisconnectDedicatedUserbot(b.channel_id)}
+                        onClick={() => handleDisconnectDedicatedUserbot(b.id, b.channel_id)}
                         disabled={actionLoading}
-                        className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold transition-all flex items-center gap-1"
-                        title="فصل هذا الحساب"
+                        className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-bold transition-all flex items-center gap-1.5"
+                        title="فصل هذا الرقم عن القناة"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>فصل</span>
+                        <span>فصل الرقم</span>
                       </button>
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD USERBOT ONBOARDING WIZARD MODAL ──────────────────────────── */}
+      {showAddUserbotModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4" dir="rtl">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5 sm:p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                  معالج ربط الأرقام الذكي
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-white mt-1 flex items-center gap-2">
+                  <Smartphone className="w-5 h-5 text-emerald-400" />
+                  <span>إضافة رقم تيليجرام جديد (يوزربوت)</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddUserbotModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Stepper Progress Bar (Stages 1 to 5) */}
+            <div className="grid grid-cols-5 gap-1.5">
+              {[
+                { num: 1, label: 'بيانات API' },
+                { num: 2, label: 'رقم الهاتف' },
+                { num: 3, label: 'كود التحقق' },
+                { num: 4, label: 'المرور 2FA' },
+                { num: 5, label: 'اكتمال الربط' }
+              ].map(st => (
+                <div key={st.num} className="space-y-1 text-center">
+                  <div className={`h-1.5 rounded-full transition-all ${
+                    userbotStep === st.num
+                      ? 'bg-emerald-500 ring-2 ring-emerald-500/30'
+                      : userbotStep > st.num
+                        ? 'bg-emerald-600'
+                        : 'bg-slate-800'
+                  }`} />
+                  <span className={`text-[10px] block truncate ${
+                    userbotStep === st.num ? 'text-emerald-400 font-bold' : userbotStep > st.num ? 'text-slate-300' : 'text-slate-600'
+                  }`}>
+                    {st.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* STAGE 1: API SELECTION & GUIDE */}
+            {userbotStep === 1 && (
+              <div className="space-y-4">
+                <div className="p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300 leading-relaxed">
+                  <strong className="text-white font-bold block mb-1">💡 لماذا نحتاج لربط حساب تيليجرام؟</strong>
+                  لكي يتمكن النظام من مراسلة الأعضاء المغادرين مباشرة من حسابك وباسم قناتك عبر بروتوكول تيليجرام الرسمي MTProto بسرعة وأمان تام.
+                </div>
+
+                <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-300 block">اختر طريقة الربط المناسبة لك:</label>
+
+                  {/* Option A: Platform Default API Keys (Recommended) */}
+                  <div
+                    onClick={() => setUseCustomApi(false)}
+                    className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                      !useCustomApi
+                        ? 'bg-emerald-950/30 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/20'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Zap className="w-4 h-4 text-amber-400" />
+                          <h4 className="text-sm font-bold text-white">الربط السريع بالمفاتيح الافتراضية (موصى به ⭐)</h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">فوري</span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          نظامنا يوفر مفاتيح API رسمية معتمدة ومجهزة تلقائياً دون الحاجة لفتح موقع تيليجرام أو استخراج أي مفاتيح بنفسك.
+                        </p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                        !useCustomApi ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-700'
+                      }`}>
+                        {!useCustomApi && <Check className="w-3 h-3" />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Option B: Custom API Keys from my.telegram.org */}
+                  <div
+                    onClick={() => setUseCustomApi(true)}
+                    className={`p-4 rounded-2xl border cursor-pointer transition-all ${
+                      useCustomApi
+                        ? 'bg-emerald-950/30 border-emerald-500/50 shadow-md ring-1 ring-emerald-500/20'
+                        : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Settings className="w-4 h-4 text-emerald-400" />
+                          <h4 className="text-sm font-bold text-white">استخدام مفاتيح API مخصصة من my.telegram.org</h4>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">اختياري</span>
+                        </div>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          للمطورين وأصحاب التطبيقات الخاصة الذين يفضلون استخدام API ID و API HASH مسجل باسمهم.
+                        </p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                        useCustomApi ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-700'
+                      }`}>
+                        {useCustomApi && <Check className="w-3 h-3" />}
+                      </div>
+                    </div>
+
+                    {/* Step-by-step guide if custom API is selected */}
+                    {useCustomApi && (
+                      <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                              <Key className="w-3.5 h-3.5" />
+                              <span>طريقة استخراج المفاتيح في 30 ثانية:</span>
+                            </span>
+                            <a
+                              href="https://my.telegram.org"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm transition-all"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                              <span>فتح my.telegram.org ↗</span>
+                            </a>
+                          </div>
+                          <ol className="text-[11px] text-slate-300 space-y-1.5 list-decimal list-inside pr-1">
+                            <li>افتح الرابط أعلاه وسجل دخولك برقم هاتفك والكود المستلم على تيليجرام.</li>
+                            <li>اضغط على خيار <strong>API development tools</strong>.</li>
+                            <li>اكتب أي اسم بالإنجليزية للتطبيق واحفظ، ثم انسخ الـ <strong>api_id</strong> و <strong>api_hash</strong>.</li>
+                          </ol>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                              App API ID (أرقام فقط) <span className="text-rose-400">*</span>
+                            </label>
+                            <input
+                              type="number"
+                              placeholder="مثال: 29482710"
+                              value={userbotForm.api_id}
+                              onChange={(e) => setUserbotForm({ ...userbotForm, api_id: e.target.value })}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">
+                              App API HASH (نص حروف ورموز) <span className="text-rose-400">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="مثال: a1b2c3d4e5f6g7h8..."
+                              value={userbotForm.api_hash}
+                              onChange={(e) => setUserbotForm({ ...userbotForm, api_hash: e.target.value })}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-mono outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (useCustomApi && (!userbotForm.api_id || !userbotForm.api_hash)) {
+                        showToast('يرجى إدخال الـ API ID و API HASH أو اختر الربط السريع بالمفاتيح الافتراضية.', 'error');
+                        return;
+                      }
+                      setUserbotStep(2);
+                    }}
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
+                  >
+                    <span>المتابعة لإدخال رقم الهاتف</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STAGE 2: PHONE NUMBER & CHANNEL SELECTION */}
+            {userbotStep === 2 && (
+              <form onSubmit={handleRequestUserbotCode} className="space-y-4">
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">
+                      القناة المستهدفة لربط هذا الرقم بها <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={userbotForm.channel_id || selectedChannelId}
+                      onChange={(e) => setUserbotForm({ ...userbotForm, channel_id: e.target.value })}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs outline-none focus:border-emerald-500 font-bold"
+                    >
+                      {channels.map(ch => (
+                        <option key={ch.id} value={ch.id}>{ch.title} ({ch.username ? `@${ch.username}` : ch.id})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 mb-1">
+                      رقم هاتف حساب التيليجرام (بصيغته الدولية الكاملة) <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="مثال: +966501234567 أو +201012345678"
+                      value={userbotForm.phone}
+                      onChange={(e) => setUserbotForm({ ...userbotForm, phone: e.target.value })}
+                      required
+                      autoFocus
+                      className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white text-sm font-mono outline-none focus:border-emerald-500"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      اكتب كود الدولة مسبوقاً بعلامة + وسيصلك كود التحقق في تطبيق تيليجرام الرسمي على هذا الرقم.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>
+                    الرقم محمي بنظام فواصل زمنية ذكية بين كل رسالة وأخرى لتجنب أي قيود من تيليجرام.
+                  </span>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setUserbotStep(1)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all"
+                  >
+                    رجوع
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={sendingOtp}
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
+                  >
+                    {sendingOtp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>جاري إرسال كود التحقق لتطبيق تيليجرام...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span>إرسال كود التحقق لتطبيق تيليجرام 📲</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* STAGE 3: ENTER OTP CODE */}
+            {userbotStep === 3 && (
+              <form onSubmit={handleVerifyUserbotCode} className="space-y-4">
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-white text-sm">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>تم إرسال كود التحقق بنجاح!</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    افتح تطبيق تيليجرام على رقمك <strong className="font-mono text-white">{userbotForm.phone}</strong>، ستجد رسالة واردة من حساب تيليجرام الرسمي تحتوي على الكود.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-300 text-center">
+                    اكتب كود التحقق المستلم (OTP)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="مثال: 54321"
+                    value={verifyCode}
+                    onChange={(e) => setVerifyCode(e.target.value)}
+                    required
+                    autoFocus
+                    className="w-full px-4 py-3.5 rounded-2xl bg-slate-950 border border-emerald-500/40 text-white text-xl font-mono text-center tracking-widest outline-none focus:border-emerald-400 font-black shadow-inner"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setUserbotStep(2)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all"
+                  >
+                    تعديل الرقم ↩
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={verifyingOtp}
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
+                  >
+                    {verifyingOtp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>جاري التحقق وإنشاء الاتصال...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>تأكيد الكود وربط الحساب 🚀</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* STAGE 4: 2FA CLOUD PASSWORD */}
+            {userbotStep === 4 && (
+              <form onSubmit={handleVerifyUserbotCode} className="space-y-4">
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-white text-sm">
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <span>مطلوب كلمة المرور السحابية (2FA)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    حساب تيليجرام الخاص بك محمي بخاصية التحقق بخطوتين (Two-Step Verification). يرجى كتابة كلمة المرور السحابية للمتابعة:
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-300">
+                    كلمة المرور السحابية (2FA Password) <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="اكتب كلمة المرور السحابية هنا..."
+                    value={verifyPassword}
+                    onChange={(e) => setVerifyPassword(e.target.value)}
+                    required
+                    autoFocus
+                    className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setUserbotStep(3)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all"
+                  >
+                    رجوع للكود
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={verifyingOtp}
+                    className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2"
+                  >
+                    {verifyingOtp ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>جاري التحقق...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>تأكيد كلمة المرور وإتمام الربط 🔐</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* STAGE 5: SUCCESS & ADDED TO FLEET */}
+            {userbotStep === 5 && (
+              <div className="p-6 rounded-3xl bg-slate-950 border border-emerald-500/30 text-center space-y-5 animate-in fade-in zoom-in-95">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/10">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+
+                <div className="space-y-1.5">
+                  <h3 className="text-lg font-black text-white">تم ربط الحساب بنجاح تام! 🎉</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed max-w-md mx-auto">
+                    تمت إضافة الرقم إلى أسطول حساباتك بنجاح وسيبدأ فوراً في نظام التناوب ومضاعفة سرعة الإرسال للأعضاء المغادرين.
+                  </p>
+                </div>
+
+                {connectedUserbotSuccess && (
+                  <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-slate-300 flex items-center justify-between gap-3 max-w-sm mx-auto">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center">
+                        🤖
+                      </div>
+                      <div className="text-right">
+                        <strong className="text-white block font-bold">{connectedUserbotSuccess.first_name || 'حساب تيليجرام'}</strong>
+                        {connectedUserbotSuccess.username && (
+                          <span className="text-[11px] text-slate-400 font-mono">@{connectedUserbotSuccess.username}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="font-mono text-emerald-400 font-bold">{connectedUserbotSuccess.phone}</span>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAddUserbotModal(false);
+                      resetUserbotWizard();
+                      fetchData(true);
+                    }}
+                    className="w-full sm:w-auto px-8 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-sm shadow-xl transition-all"
+                  >
+                    إغلاق وعرض أسطول الحسابات ⚡
+                  </button>
+                </div>
               </div>
             )}
           </div>

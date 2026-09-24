@@ -456,6 +456,15 @@ class RetentionEngine:
                 initial_status = "SCHEDULED"
                 scheduled_at = now
 
+                # Pre-bind previously assigned userbot to strictly guarantee single-messenger rule
+                prev_assigned = db.query(RecoveryCase.assigned_userbot).filter(
+                    RecoveryCase.tenant_id == channel.tenant_id,
+                    RecoveryCase.telegram_user_id == telegram_user_id,
+                    RecoveryCase.assigned_userbot != None
+                ).order_by(RecoveryCase.created_at.desc()).first()
+
+                assigned_bot = prev_assigned[0] if (prev_assigned and prev_assigned[0]) else None
+
                 case = RecoveryCase(
                     tenant_id=channel.tenant_id,
                     channel_id=channel.id,
@@ -464,11 +473,12 @@ class RetentionEngine:
                     leave_event_id=leave_event_id,
                     status=initial_status,
                     contactable=True,
+                    assigned_userbot=assigned_bot,
                     scheduled_contact_at=scheduled_at,
                     created_at=event_date
                 )
                 db.add(case)
-                logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
+                logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}] (Assigned: {assigned_bot or 'Pending Round-Robin'})")
 
         channel.last_event_at = event_date
         channel.last_success_at = datetime.now(timezone.utc)
@@ -894,23 +904,69 @@ class RetentionEngine:
                 ub.last_error = None
         db.commit()
 
-        # Partition bots: Ready vs Limited
-        ready_userbots = [
-            ub for ub in tenant_userbots
-            if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-            and (ub.daily_contacts_count or 0) < 50
-            and ub.status == "CONNECTED"
-        ]
-        limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
+        # ── STRICT SINGLE-MESSENGER ENFORCEMENT ───────────────────────────────
+        assigned_bot_name = case.assigned_userbot
+        if not assigned_bot_name and case.telegram_user_id:
+            prev_contact = db.query(RecoveryCase.assigned_userbot).filter(
+                RecoveryCase.tenant_id == channel.tenant_id,
+                RecoveryCase.telegram_user_id == case.telegram_user_id,
+                RecoveryCase.assigned_userbot != None
+            ).order_by(RecoveryCase.created_at.desc()).first()
+            if prev_contact and prev_contact[0]:
+                assigned_bot_name = prev_contact[0]
+                case.assigned_userbot = assigned_bot_name
+                db.commit()
 
         res = {"success": False, "error": "NO_AVAILABLE_BOTS"}
 
-        if ready_userbots:
-            # Sort for fair distribution
-            ready_userbots.sort(key=lambda ub: ub.id)
-            start_idx = self._rr_index % len(ready_userbots)
-            self._rr_index += 1
-            ordered_userbots = ready_userbots[start_idx:] + ready_userbots[:start_idx]
+        if assigned_bot_name:
+            clean_assigned = assigned_bot_name.lstrip('@').lower()
+            matching_bot = next(
+                (ub for ub in tenant_userbots if (ub.username and ub.username.lower() == clean_assigned) or (ub.phone == assigned_bot_name) or (ub.id == assigned_bot_name)),
+                None
+            )
+            if matching_bot:
+                cd = self._to_utc(matching_bot.cooldown_until)
+                if matching_bot.status == "FLOOD_WAIT" and cd and cd > now:
+                    wait_min = max(1, int((cd - now).total_seconds()) // 60)
+                    case.scheduled_contact_at = cd
+                    case.status = "SCHEDULED"
+                    case.contactable = True
+                    case.uncontactable_reason = None
+                    db.commit()
+                    return {
+                        "success": False,
+                        "error_code": "ASSIGNED_BOT_LIMITED",
+                        "message": f"الحساب المخصص لهذا العميل (@{matching_bot.username}) في راحة مؤقتة حتى {cd.strftime('%H:%M UTC')}. ستتم المراسلة تلقائياً عبره فور انتهاء الراحة للحفاظ على استمرارية نفس الرقم وعدم المراسلة من رقم آخر."
+                    }
+
+                # Send ONLY via this matching bot to guarantee single messenger!
+                res = await dedicated_userbot_service.send_direct_message_for_channel(
+                    db=db,
+                    channel_id=matching_bot.channel_id,
+                    target_user_id=int(case.telegram_user_id),
+                    text=outbound_text,
+                    target_username=username,
+                    access_hash=access_hash,
+                    userbot_id=matching_bot.id
+                )
+
+        if not assigned_bot_name or (not res.get("success") and res.get("error") == "NO_DEDICATED_USERBOT"):
+            # Partition bots: Ready vs Limited
+            ready_userbots = [
+                ub for ub in tenant_userbots
+                if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
+                and (ub.daily_contacts_count or 0) < 50
+                and ub.status == "CONNECTED"
+            ]
+            limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
+
+            if ready_userbots:
+                # Sort for fair distribution
+                ready_userbots.sort(key=lambda ub: ub.id)
+                start_idx = self._rr_index % len(ready_userbots)
+                self._rr_index += 1
+                ordered_userbots = ready_userbots[start_idx:] + ready_userbots[:start_idx]
 
             # Try candidate accounts in sequence (failover chain)
             for bot in ordered_userbots:

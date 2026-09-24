@@ -508,14 +508,45 @@ async def send_manual_case_message(
         except (ValueError, TypeError):
             access_hash = None
 
-    res = await userbot_pool.send_direct_message(
-        target_user_id=int(case.telegram_user_id),
-        text=payload.text,
-        channel_id=case.channel_id,
-        preferred_session=case.assigned_userbot,
-        target_username=username,
-        access_hash=access_hash
-    )
+    # Look for dedicated userbot assigned to this case or channel to preserve single-messenger guarantee
+    dedicated_bot = None
+    if case.assigned_userbot:
+        clean_assigned = case.assigned_userbot.lstrip('@')
+        dedicated_bot = db.query(ChannelUserbot).filter(
+            ChannelUserbot.tenant_id == tenant_id,
+            ChannelUserbot.is_active == True,
+            or_(
+                ChannelUserbot.username == clean_assigned,
+                ChannelUserbot.phone == case.assigned_userbot,
+                ChannelUserbot.id == case.assigned_userbot
+            )
+        ).first()
+
+    if not dedicated_bot:
+        dedicated_bot = db.query(ChannelUserbot).filter(
+            ChannelUserbot.channel_id == case.channel_id,
+            ChannelUserbot.is_active == True
+        ).first()
+
+    if dedicated_bot:
+        res = await dedicated_userbot_service.send_direct_message_for_channel(
+            db=db,
+            channel_id=dedicated_bot.channel_id,
+            target_user_id=int(case.telegram_user_id),
+            text=payload.text,
+            target_username=username,
+            access_hash=access_hash,
+            userbot_id=dedicated_bot.id
+        )
+    else:
+        res = await userbot_pool.send_direct_message(
+            target_user_id=int(case.telegram_user_id),
+            text=payload.text,
+            channel_id=case.channel_id,
+            preferred_session=case.assigned_userbot,
+            target_username=username,
+            access_hash=access_hash
+        )
 
     if not res["success"]:
         detail_msg = res.get("error_ar") or f"فشل إرسال الرسالة: {res.get('error', 'Unknown error')}"
@@ -800,9 +831,62 @@ async def get_userbots_status(
             "daily_contacts_sent": ub.daily_contacts_count or 0,
             "max_daily_contacts": 35,
             "in_cooldown": bool(ub_cd and ub_cd > now),
+            "cooldown_until": ub_cd.isoformat() if ub_cd else None,
             "created_at": ub.created_at.isoformat() if ub.created_at else None
         })
     return result
+
+
+@router.delete("/userbots/{userbot_id}")
+async def disconnect_userbot_by_id(
+    userbot_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Disconnects and removes a specific dedicated userbot by its unique ID.
+    """
+    return await dedicated_userbot_service.disconnect_userbot(
+        db=db,
+        tenant_id=tenant_id,
+        userbot_id=userbot_id
+    )
+
+
+@router.post("/userbots/{userbot_id}/avatar")
+async def update_userbot_avatar_by_id(
+    userbot_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Uploads a new profile picture to Telegram for the specified userbot ID.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="يرجى رفع ملف صورة صالح (JPEG أو PNG)")
+
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="حجم الصورة كبير جداً (الحد الأقصى 10 ميجابايت)")
+
+    userbot = db.query(ChannelUserbot).filter(
+        ChannelUserbot.id == userbot_id,
+        ChannelUserbot.tenant_id == tenant_id
+    ).first()
+
+    if not userbot:
+        # Fallback to pool if matching session_name
+        return await update_userbot_avatar(session_name=userbot_id, file=file, current_user=current_user)
+
+    return await dedicated_userbot_service.upload_userbot_avatar(
+        db=db,
+        channel_id=userbot.channel_id,
+        image_bytes=contents,
+        userbot_id=userbot.id
+    )
 
 
 @router.get("/userbots/{session_name}/avatar")
