@@ -1049,6 +1049,7 @@ async def update_channel_userbot_avatar(
     return await dedicated_userbot_service.upload_userbot_avatar(db, channel_id, contents)
 
 
+@router.post("/userbots/{userbot_id}/auto-heal")
 @router.post("/userbot/{userbot_id}/auto-heal")
 async def trigger_userbot_auto_heal(
     userbot_id: str,
@@ -1058,6 +1059,7 @@ async def trigger_userbot_auto_heal(
 ):
     """
     Triggers automated SpamBot appeal, limit inspection, and cooldown clearance for a userbot.
+    Always uses force=True when triggered on demand by the user.
     """
     userbot = db.query(ChannelUserbot).filter(
         ChannelUserbot.id == userbot_id,
@@ -1069,14 +1071,48 @@ async def trigger_userbot_auto_heal(
     unlocked, status_msg, cd = await dedicated_userbot_service.auto_heal_userbot_via_spambot(
         db=db,
         channel_id=userbot.channel_id,
-        userbot_id=userbot.id
+        userbot_id=userbot.id,
+        force=True
     )
     db.refresh(userbot)
+    
+    cd_formatted = userbot.cooldown_until.strftime('%Y-%m-%d %H:%M UTC') if userbot.cooldown_until else "انتهاء فترة الراحة"
     return {
         "success": unlocked,
         "status": userbot.status,
         "cooldown_until": userbot.cooldown_until,
-        "message": "تم فك تقييد الحساب بنجاح وهو الآن متاح للعمل! 🎉" if unlocked else f"الحساب مقيد حالياً من تيليجرام حتى {userbot.cooldown_until.strftime('%Y-%m-%d %H:%M UTC') if userbot.cooldown_until else 'انتهاء فترة الراحة'}"
+        "last_error": userbot.last_error,
+        "message": "تم فك تقييد الحساب بنجاح عبر SpamBot وهو الآن حر طليق ومتصل وجاهز للعمل! 🎉" if unlocked else f"الحساب مقيد حالياً من تيليجرام حتى {cd_formatted} وسيتم فكه تلقائياً عند هذا الموعد."
+    }
+
+
+@router.post("/userbots/{userbot_id}/reset-status")
+async def reset_userbot_status(
+    userbot_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually resets userbot status to CONNECTED and clears cooldown.
+    """
+    userbot = db.query(ChannelUserbot).filter(
+        ChannelUserbot.id == userbot_id,
+        ChannelUserbot.tenant_id == tenant_id
+    ).first()
+    if not userbot:
+        raise HTTPException(status_code=404, detail="اليوزربوت المحدد غير موجود")
+
+    userbot.status = "CONNECTED"
+    userbot.cooldown_until = None
+    userbot.last_error = None
+    db.commit()
+    db.refresh(userbot)
+
+    return {
+        "success": True,
+        "status": userbot.status,
+        "message": f"تمت إعادة تفعيل الرقم {userbot.username or userbot.phone} بنجاح وحالته الآن: متصل ونشط 🟢"
     }
 
 

@@ -670,7 +670,7 @@ class DedicatedUserbotService:
         self._last_spambot_checks[bot_check_key] = now_ts
 
         try:
-            logger.info(f"[🤖 SpamBot Auto-Healer]: Running automated SpamBot check for {bot_label}...")
+            logger.info(f"[🤖 SpamBot Auto-Healer]: Running automated SpamBot check for {bot_label} (force={force})...")
             await client.send_message('@SpamBot', '/start')
             await asyncio.sleep(2)
             msgs = await client.get_messages('@SpamBot', limit=1)
@@ -679,8 +679,12 @@ class DedicatedUserbotService:
 
             txt = msgs[0].text or ""
 
-            # Check if account is free
-            if any(term in txt.lower() for term in ["free as a bird", "no limits are currently applied"]):
+            # Check if account is completely free (English & Arabic)
+            free_phrases = [
+                "free as a bird", "no limits are currently applied", "no limits",
+                "حر طليق", "لاتوجد قيود", "لا توجد قيود", "لا توجد أي قيود", "أنت حر"
+            ]
+            if any(term in txt.lower() for term in free_phrases):
                 logger.info(f"[🕊️ SpamBot Auto-Healer]: {bot_label} is free as a bird! Auto-restoring status to CONNECTED.")
                 if userbot:
                     userbot.status = "CONNECTED"
@@ -689,7 +693,7 @@ class DedicatedUserbotService:
                     db.commit()
                 return True, "FREE_AS_A_BIRD", None
 
-            # Parse target cooldown date if specified by Telegram (e.g. "limited until 25 Sep 2026, 10:17 UTC")
+            # Parse target cooldown date if specified by Telegram
             cooldown_dt = None
             match = re.search(r'limited until\s+([0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4},\s+[0-9]{1,2}:[0-9]{2}\s+UTC)', txt)
             if match:
@@ -704,7 +708,8 @@ class DedicatedUserbotService:
             clicked_why = False
             for row in (msgs[0].buttons or []):
                 for btn in row:
-                    if "Why was I reported" in btn.text:
+                    b_txt = btn.text.lower()
+                    if any(term in b_txt for term in ["why was i reported", "لماذا تم", "ليه تم", "تم الإبلاغ", "بلاغ"]):
                         await btn.click()
                         clicked_why = True
                         break
@@ -713,14 +718,15 @@ class DedicatedUserbotService:
             if not clicked_why:
                 await client.send_message('@SpamBot', 'Why was I reported?')
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
             msgs2 = await client.get_messages('@SpamBot', limit=1)
 
             # Step 2: Click 'I understand, thanks' or send text
             clicked_thanks = False
             for row in ((msgs2[0].buttons if msgs2 else []) or []):
                 for btn in row:
-                    if any(term in btn.text.lower() for term in ["understand", "thanks"]):
+                    b_txt = btn.text.lower()
+                    if any(term in b_txt for term in ["understand", "thanks", "فهمت", "شكرا", "أفهم", "شكراً"]):
                         await btn.click()
                         clicked_thanks = True
                         break
@@ -729,7 +735,7 @@ class DedicatedUserbotService:
             if not clicked_thanks:
                 await client.send_message('@SpamBot', 'I understand, thanks')
 
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
             # Step 3: Send final /start to trigger release check
             await client.send_message('@SpamBot', '/start')
@@ -737,7 +743,7 @@ class DedicatedUserbotService:
             msgs_final = await client.get_messages('@SpamBot', limit=1)
             final_txt = (msgs_final[0].text or "") if msgs_final else ""
 
-            if any(term in final_txt.lower() for term in ["free as a bird", "no limits are currently applied"]):
+            if any(term in final_txt.lower() for term in free_phrases):
                 logger.info(f"[🎉 SpamBot Auto-Healer]: Successfully unlocked {bot_label}! Restoring to CONNECTED.")
                 if userbot:
                     userbot.status = "CONNECTED"
@@ -750,7 +756,7 @@ class DedicatedUserbotService:
                 if userbot:
                     if cooldown_dt:
                         userbot.cooldown_until = cooldown_dt
-                    else:
+                    elif not userbot.cooldown_until or userbot.cooldown_until < datetime.now(timezone.utc):
                         userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=15)
                     userbot.status = "FLOOD_WAIT"
                     userbot.last_error = f"Telegram limit until {userbot.cooldown_until.strftime('%Y-%m-%d %H:%M UTC')}"

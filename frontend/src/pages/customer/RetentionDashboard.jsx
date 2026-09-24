@@ -102,6 +102,8 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [connectedUserbotSuccess, setConnectedUserbotSuccess] = useState(null);
+  const [healingBotId, setHealingBotId] = useState(null);
+  const [resettingBotId, setResettingBotId] = useState(null);
 
   // Settings Form State
   const [savingSettings, setSavingSettings] = useState(false);
@@ -373,6 +375,36 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       showToast('فشل رفع الصورة: ' + (err.response?.data?.detail || err.message), 'error');
     } finally {
       setUploadingAvatar(false);
+    }
+  };
+
+  const handleSpamBotAutoHeal = async (userbotId) => {
+    try {
+      setHealingBotId(userbotId);
+      const res = await apiClient.post(`/retention/userbots/${userbotId}/auto-heal`);
+      if (res.data?.success) {
+        showToast(res.data?.message || 'تم فك تقييد الحساب بنجاح عبر SpamBot! الحساب متصل ونشط 🟢', 'success');
+      } else {
+        showToast(res.data?.message || 'الحساب مقيد حالياً من تيليجرام.', 'warning');
+      }
+      fetchData(true);
+    } catch (err) {
+      showToast('فشل فحص SpamBot: ' + (err.response?.data?.detail || err.message), 'error');
+    } finally {
+      setHealingBotId(null);
+    }
+  };
+
+  const handleResetUserbotStatus = async (userbotId) => {
+    try {
+      setResettingBotId(userbotId);
+      const res = await apiClient.post(`/retention/userbots/${userbotId}/reset-status`);
+      showToast(res.data?.message || 'تمت إعادة تفعيل الرقم بنجاح 🟢', 'success');
+      fetchData(true);
+    } catch (err) {
+      showToast('فشل إعادة تفعيل الرقم: ' + (err.response?.data?.detail || err.message), 'error');
+    } finally {
+      setResettingBotId(null);
     }
   };
 
@@ -2545,6 +2577,52 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                           <span className="text-amber-400 font-bold">حماية تيليجرام نشطة مؤقتاً</span>
                         ) : (
                           <span className="text-emerald-400">جاهز لاستلام حالات جديدة</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Auto-Heal & SpamBot Control Row */}
+                    <div className="pt-2 border-t border-slate-800/70 flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSpamBotAutoHeal(b.id)}
+                          disabled={healingBotId === b.id}
+                          className={`flex-1 py-1.5 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shadow-sm ${
+                            b.in_cooldown
+                              ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
+                              : 'bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border-indigo-500/20'
+                          }`}
+                          title="تشغيل فحص SpamBot التلقائي لفك الحظر عبر الخطوات الرسمية"
+                        >
+                          {healingBotId === b.id ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                              <span>جاري الفحص مع SpamBot...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                              <span>فحص وفك الحظر (SpamBot) 🤖</span>
+                            </>
+                          )}
+                        </button>
+
+                        {b.in_cooldown && (
+                          <button
+                            type="button"
+                            onClick={() => handleResetUserbotStatus(b.id)}
+                            disabled={resettingBotId === b.id}
+                            className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-xs font-bold transition-all flex items-center gap-1 shrink-0"
+                            title="تجاوز فترة الانتظار وتعيين الحساب إلى متصل ونشط فوراً"
+                          >
+                            {resettingBotId === b.id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            )}
+                            <span>تفعيل يدوي 🟢</span>
+                          </button>
                         )}
                       </div>
                     </div>
