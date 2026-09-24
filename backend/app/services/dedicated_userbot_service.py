@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 import time
 from datetime import datetime, timezone, date, timedelta
 from typing import Dict, Any, Optional, Tuple
@@ -514,17 +515,38 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 60
             }
         except PeerFloodError:
-            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=15)
-            userbot.status = "FLOOD_WAIT"
-            userbot.last_error = "PeerFloodError from Telegram"
-            db.commit()
-            return {
-                "success": False,
-                "error": "PEER_FLOOD",
-                "error_ar": "الحساب مقيد مؤقتاً لدقائق من تيليجرام لمراسلة غير جهات الاتصال.",
-                "can_retry": True,
-                "retry_delay_seconds": 900
-            }
+            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Triggering immediate SpamBot auto-healer...")
+            unlocked, status_msg, cd_time = await self.auto_heal_userbot_via_spambot(
+                db=db,
+                channel_id=channel_id,
+                userbot_id=userbot.id,
+                client=client
+            )
+            if unlocked:
+                return {
+                    "success": False,
+                    "error": "PEER_FLOOD_UNLOCKED",
+                    "error_ar": "تم فك تقييد الحساب تلقائياً عبر تيليجرام. ستتم إعادة المحاولة فوراً.",
+                    "can_retry": True,
+                    "retry_delay_seconds": 5
+                }
+            else:
+                wait_sec = 900
+                if userbot.cooldown_until:
+                    now_u = datetime.now(timezone.utc)
+                    cd = userbot.cooldown_until
+                    if cd.tzinfo is None:
+                        cd = cd.replace(tzinfo=timezone.utc)
+                    if cd > now_u:
+                        wait_sec = int((cd - now_u).total_seconds())
+
+                return {
+                    "success": False,
+                    "error": "PEER_FLOOD",
+                    "error_ar": f"الحساب مقيد مؤقتاً من تيليجرام حتى {userbot.cooldown_until.strftime('%H:%M UTC') if userbot.cooldown_until else 'دقائق'}.",
+                    "can_retry": True,
+                    "retry_delay_seconds": wait_sec
+                }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))
             userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=wait)
@@ -576,6 +598,127 @@ class DedicatedUserbotService:
                 "can_retry": True,
                 "retry_delay_seconds": 300
             }
+
+    async def auto_heal_userbot_via_spambot(
+        self,
+        db: Session,
+        channel_id: str,
+        userbot_id: Optional[str] = None,
+        client: Optional[TelegramClient] = None
+    ) -> Tuple[bool, str, Optional[datetime]]:
+        """
+        Automated Telegram @SpamBot appeal and cooldown cleanser.
+        Interacts with @SpamBot:
+        1. Sends /start
+        2. Detects if free ("free as a bird" or "no limits") -> unlocks immediately.
+        3. If limited, clicks 'Why was I reported?' -> 'I understand, thanks' -> '/start'
+           to acknowledge the warning and dismiss expired or dismissible limits.
+        4. Extracts exact release timestamp from Telegram and updates database cooldown.
+        """
+        if not client:
+            client = await self.get_client_for_channel(db, channel_id, userbot_id=userbot_id)
+        if not client:
+            return False, "CLIENT_UNAVAILABLE", None
+
+        userbot = None
+        if userbot_id:
+            userbot = db.query(ChannelUserbot).filter(ChannelUserbot.id == userbot_id).first()
+        elif channel_id:
+            userbot = db.query(ChannelUserbot).filter(ChannelUserbot.channel_id == channel_id).first()
+
+        bot_label = (userbot.username if userbot else None) or (userbot.phone if userbot else "userbot")
+
+        try:
+            logger.info(f"[🤖 SpamBot Auto-Healer]: Running automated SpamBot check for {bot_label}...")
+            await client.send_message('@SpamBot', '/start')
+            await asyncio.sleep(2)
+            msgs = await client.get_messages('@SpamBot', limit=1)
+            if not msgs:
+                return False, "NO_SPAMBOT_REPLY", None
+
+            txt = msgs[0].text or ""
+
+            # Check if account is free
+            if any(term in txt.lower() for term in ["free as a bird", "no limits are currently applied"]):
+                logger.info(f"[🕊️ SpamBot Auto-Healer]: {bot_label} is free as a bird! Auto-restoring status to CONNECTED.")
+                if userbot:
+                    userbot.status = "CONNECTED"
+                    userbot.cooldown_until = None
+                    userbot.last_error = None
+                    db.commit()
+                return True, "FREE_AS_A_BIRD", None
+
+            # Parse target cooldown date if specified by Telegram (e.g. "limited until 25 Sep 2026, 10:17 UTC")
+            cooldown_dt = None
+            match = re.search(r'limited until\s+([0-9]{1,2}\s+[A-Za-z]{3}\s+[0-9]{4},\s+[0-9]{1,2}:[0-9]{2}\s+UTC)', txt)
+            if match:
+                date_str = match.group(1)
+                try:
+                    cooldown_dt = datetime.strptime(date_str, "%d %b %Y, %H:%M UTC").replace(tzinfo=timezone.utc)
+                    logger.info(f"[⏳ SpamBot Auto-Healer]: {bot_label} has exact Telegram limit until {cooldown_dt}")
+                except Exception:
+                    pass
+
+            # Step 1: Click 'Why was I reported?' or send text
+            clicked_why = False
+            for row in (msgs[0].buttons or []):
+                for btn in row:
+                    if "Why was I reported" in btn.text:
+                        await btn.click()
+                        clicked_why = True
+                        break
+                if clicked_why:
+                    break
+            if not clicked_why:
+                await client.send_message('@SpamBot', 'Why was I reported?')
+
+            await asyncio.sleep(2)
+            msgs2 = await client.get_messages('@SpamBot', limit=1)
+
+            # Step 2: Click 'I understand, thanks' or send text
+            clicked_thanks = False
+            for row in ((msgs2[0].buttons if msgs2 else []) or []):
+                for btn in row:
+                    if any(term in btn.text.lower() for term in ["understand", "thanks"]):
+                        await btn.click()
+                        clicked_thanks = True
+                        break
+                if clicked_thanks:
+                    break
+            if not clicked_thanks:
+                await client.send_message('@SpamBot', 'I understand, thanks')
+
+            await asyncio.sleep(2)
+
+            # Step 3: Send final /start to trigger release check
+            await client.send_message('@SpamBot', '/start')
+            await asyncio.sleep(2)
+            msgs_final = await client.get_messages('@SpamBot', limit=1)
+            final_txt = (msgs_final[0].text or "") if msgs_final else ""
+
+            if any(term in final_txt.lower() for term in ["free as a bird", "no limits are currently applied"]):
+                logger.info(f"[🎉 SpamBot Auto-Healer]: Successfully unlocked {bot_label}! Restoring to CONNECTED.")
+                if userbot:
+                    userbot.status = "CONNECTED"
+                    userbot.cooldown_until = None
+                    userbot.last_error = None
+                    db.commit()
+                return True, "AUTO_UNLOCKED", None
+            else:
+                logger.info(f"[⏳ SpamBot Auto-Healer]: {bot_label} remains limited until {cooldown_dt or 'cooldown'}.")
+                if userbot:
+                    if cooldown_dt:
+                        userbot.cooldown_until = cooldown_dt
+                    else:
+                        userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+                    userbot.status = "FLOOD_WAIT"
+                    userbot.last_error = f"Telegram limit until {userbot.cooldown_until.strftime('%Y-%m-%d %H:%M UTC')}"
+                    db.commit()
+                return False, "STILL_LIMITED", cooldown_dt
+
+        except Exception as e:
+            logger.error(f"[SpamBot Auto-Healer Error for {bot_label}]: {e}")
+            return False, str(e), None
 
     async def upload_userbot_avatar(self, db: Session, channel_id: str, image_bytes: bytes) -> Dict[str, Any]:
         """Uploads and changes profile picture of channel's dedicated userbot."""

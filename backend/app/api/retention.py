@@ -964,6 +964,37 @@ async def update_channel_userbot_avatar(
     return await dedicated_userbot_service.upload_userbot_avatar(db, channel_id, contents)
 
 
+@router.post("/userbot/{userbot_id}/auto-heal")
+async def trigger_userbot_auto_heal(
+    userbot_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Triggers automated SpamBot appeal, limit inspection, and cooldown clearance for a userbot.
+    """
+    userbot = db.query(ChannelUserbot).filter(
+        ChannelUserbot.id == userbot_id,
+        ChannelUserbot.tenant_id == tenant_id
+    ).first()
+    if not userbot:
+        raise HTTPException(status_code=404, detail="اليوزربوت المحدد غير موجود")
+
+    unlocked, status_msg, cd = await dedicated_userbot_service.auto_heal_userbot_via_spambot(
+        db=db,
+        channel_id=userbot.channel_id,
+        userbot_id=userbot.id
+    )
+    db.refresh(userbot)
+    return {
+        "success": unlocked,
+        "status": userbot.status,
+        "cooldown_until": userbot.cooldown_until,
+        "message": "تم فك تقييد الحساب بنجاح وهو الآن متاح للعمل! 🎉" if unlocked else f"الحساب مقيد حالياً من تيليجرام حتى {userbot.cooldown_until.strftime('%Y-%m-%d %H:%M UTC') if userbot.cooldown_until else 'انتهاء فترة الراحة'}"
+    }
+
+
 # ── SaaS Multi-Tenant Retention & Winback API Endpoints ──────────────────────
 
 @router.post("/channels/{channel_id}/invite-links", response_model=InviteLinkOut)

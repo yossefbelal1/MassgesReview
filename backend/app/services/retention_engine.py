@@ -1066,6 +1066,26 @@ class RetentionEngine:
         active_tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
 
         for tenant in active_tenants:
+            # Auto-heal any dedicated userbots in FLOOD_WAIT when their cooldown expires
+            flood_bots = db.query(ChannelUserbot).filter(
+                ChannelUserbot.tenant_id == tenant.id,
+                ChannelUserbot.is_active == True,
+                ChannelUserbot.status == "FLOOD_WAIT"
+            ).all()
+            for fb in flood_bots:
+                fb_cd = self._to_utc(fb.cooldown_until)
+                if not fb_cd or fb_cd <= now:
+                    try:
+                        asyncio.create_task(
+                            dedicated_userbot_service.auto_heal_userbot_via_spambot(
+                                db=db,
+                                channel_id=fb.channel_id,
+                                userbot_id=fb.id
+                            )
+                        )
+                    except Exception as he_err:
+                        logger.error(f"[Worker Auto-Heal trigger error]: {he_err}")
+
             # Check count of active dedicated userbots for this tenant
             active_bots = db.query(ChannelUserbot).filter(
                 ChannelUserbot.tenant_id == tenant.id,
