@@ -908,12 +908,14 @@ class RetentionEngine:
 
         chosen_userbot = None
         if not username and access_hash:
-            # Must be sent by the bot that holds the MTProto access hash
+            # Check if hash owner is ready
             hash_owner = next(
                 (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
                 None
             )
-            if hash_owner:
+            if hash_owner and hash_owner in ready_userbots:
+                chosen_userbot = hash_owner
+            elif not ready_userbots and hash_owner:
                 ub_cd = self._to_utc(hash_owner.cooldown_until)
                 if ub_cd and ub_cd > now:
                     wait_sec = max(10, int((ub_cd - now).total_seconds()))
@@ -928,8 +930,6 @@ class RetentionEngine:
                         "error_code": "HASH_OWNER_COOLDOWN",
                         "error": f"الحساب المخصص للتواصل في فترة راحة مؤقتة، ستتم المراسلة تلقائياً بعد {wait_sec} ثانية."
                     }
-                elif hash_owner in ready_userbots:
-                    chosen_userbot = hash_owner
 
         if ready_userbots:
             if not chosen_userbot:

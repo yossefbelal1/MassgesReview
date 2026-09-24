@@ -410,16 +410,51 @@ class DedicatedUserbotService:
             await asyncio.sleep(random.uniform(1.5, 3.0))
 
         try:
-            # Resolve target entity
+            # Resolve target entity intelligently across userbot sessions
+            entity = None
             if target_username:
                 entity = target_username
-            elif access_hash:
-                entity = InputPeerUser(int(target_user_id), int(access_hash))
             else:
+                # 1. Try local session cache first
                 try:
-                    entity = await client.get_entity(int(target_user_id))
+                    entity = await client.get_input_entity(int(target_user_id))
                 except Exception:
-                    entity = int(target_user_id)
+                    entity = None
+
+                # 2. If not found in cache, attempt to warm cache from channel admin log
+                if not entity:
+                    channel = db.query(Channel).filter(Channel.id == channel_id).first()
+                    if channel and channel.telegram_chat_id:
+                        try:
+                            from telethon.tl.functions.channels import GetAdminLogRequest
+                            from telethon.tl.types import ChannelAdminLogEventsFilter
+                            chan_ent = await client.get_entity(int(channel.telegram_chat_id))
+                            await client(GetAdminLogRequest(
+                                channel=chan_ent,
+                                q='',
+                                max_id=0,
+                                min_id=0,
+                                limit=100,
+                                events_filter=ChannelAdminLogEventsFilter(leave=True)
+                            ))
+                            entity = await client.get_input_entity(int(target_user_id))
+                            logger.info(f"[Warm Cache]: Successfully resolved user {target_user_id} via channel {channel.title} admin log!")
+                        except Exception as warm_err:
+                            logger.debug(f"[Userbot entity warm failed for user {target_user_id}]: {warm_err}")
+
+                # 3. Fallback to access_hash if provided
+                if not entity and access_hash:
+                    try:
+                        entity = InputPeerUser(int(target_user_id), int(access_hash))
+                    except Exception:
+                        entity = None
+
+                # 4. Fallback to raw user ID
+                if not entity:
+                    try:
+                        entity = await client.get_entity(int(target_user_id))
+                    except Exception:
+                        entity = int(target_user_id)
 
             # Simulate natural human typing action to satisfy Telegram anti-spam heuristics
             try:
@@ -469,14 +504,14 @@ class DedicatedUserbotService:
                 "uncontactable_reason": "USER_BLOCKED_OR_DELETED",
                 "can_retry": False
             }
-        except (ValueError, TypeError, KeyError) as val_err:
-            logger.info(f"[🛡️ Unresolvable Telegram Entity]: User {target_user_id} cannot be resolved by MTProto: {val_err}")
+        except (ValueError, TypeError, KeyError, PeerIdInvalidError) as val_err:
+            logger.info(f"[🛡️ Unresolvable Telegram Entity on {userbot.username}]: User {target_user_id} cannot be resolved currently: {val_err}")
             return {
                 "success": False,
                 "error": "CANNOT_RESOLVE_PEER",
-                "error_ar": "لا يملك المستخدم معرفاً عاماً (@username) أو جهة اتصال متبادلة، وتمنع بروتوكولات تيليجرام مراسلته بدون معرف.",
-                "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
-                "can_retry": False
+                "error_ar": "تعذر مطابقة المستخدم عبر هذا الحساب حالياً، ستتم إعادة المحاولة آلياً.",
+                "can_retry": True,
+                "retry_delay_seconds": 60
             }
         except PeerFloodError:
             userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=15)
@@ -502,14 +537,6 @@ class DedicatedUserbotService:
                 "error_ar": f"طلب تيليجرام الانتظار {wait} ثانية.",
                 "can_retry": True,
                 "retry_delay_seconds": wait
-            }
-        except PeerIdInvalidError:
-            return {
-                "success": False,
-                "error": "PEER_ID_INVALID",
-                "error_ar": "لا يملك المستخدم معرفاً عاماً (@username) أو إعدادات خصوصيته تمنع المراسلة المباشرة.",
-                "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
-                "can_retry": False
             }
         except RPCError as rpc_err:
             err_msg = str(rpc_err).upper()

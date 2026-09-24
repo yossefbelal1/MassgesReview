@@ -535,7 +535,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       case 'SCHEDULED':
         return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center gap-1">⏱️ مجدولة للتواصل</span>;
       case 'UNCONTACTABLE':
-        return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-500/10 text-sky-300 border border-sky-500/30 flex items-center gap-1">👤 تتطلب مراسلة يدوية</span>;
+        return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1" title="إعدادات خصوصية المستخدم في تيليجرام تمنع استقبال الرسائل من غير جهات الاتصال">🔒 خصوصية تيليجرام مانعة</span>;
       case 'OPT_OUT':
         return <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center gap-1">⛔ رفض المتابعة</span>;
       default:
@@ -848,7 +848,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                 <option value="LINK_DELIVERED">تم إرسال الرابط 🔗</option>
                 <option value="CONTACTED">تم التواصل 📩</option>
                 <option value="SCHEDULED">مجدولة في الطابور ⏱️</option>
-                <option value="UNCONTACTABLE">تتطلب مراسلة يدوية 👤</option>
+                <option value="UNCONTACTABLE">🔒 خصوصية تيليجرام مانعة</option>
                 <option value="OPT_OUT">رفض المتابعة ⛔</option>
               </select>
 
@@ -1313,7 +1313,7 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                     <option value="LINK_DELIVERED">تم إرسال الرابط 🔗</option>
                     <option value="CONTACTED">تم التواصل 📩</option>
                     <option value="SCHEDULED">في الطابور ⏱️</option>
-                    <option value="UNCONTACTABLE">تتطلب مراسلة يدوية 👤</option>
+                    <option value="UNCONTACTABLE">🔒 خصوصية تيليجرام مانعة</option>
                   </select>
 
                   <button
