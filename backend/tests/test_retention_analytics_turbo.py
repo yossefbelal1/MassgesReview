@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from backend.app.models.models import Channel, AudienceMember, RecoveryCase
+from backend.app.models.models import Channel, AudienceMember, RecoveryCase, RecoveryMessage
 
 def test_retention_summary_funnel_and_status_distribution(client: TestClient, db: Session, tenant_a: dict):
     user = tenant_a["user"]
@@ -176,3 +176,106 @@ def test_turbo_dispatch_staggers_scheduled_cases(client: TestClient, db: Session
     diff_2_1 = (t2 - t1).total_seconds()
     assert 14 <= diff_1_0 <= 16
     assert 14 <= diff_2_1 <= 16
+
+
+def test_recovery_cases_stage_filtering_and_message_previews(client: TestClient, db: Session, tenant_a: dict):
+    user = tenant_a["user"]
+    token = tenant_a["token"]
+    now = datetime.now(timezone.utc)
+
+    channel = Channel(
+        tenant_id=user.tenant_id,
+        title="Stage Test Channel",
+        is_connected=True,
+        telegram_chat_id="-100123999"
+    )
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+
+    # 1. Stage 1 only: scheduled leaver
+    c1 = RecoveryCase(
+        tenant_id=user.tenant_id,
+        channel_id=channel.id,
+        telegram_user_id="user_stage_1",
+        status="SCHEDULED",
+        created_at=now - timedelta(hours=5)
+    )
+    # 2. Stage 2: contacted leaver
+    c2 = RecoveryCase(
+        tenant_id=user.tenant_id,
+        channel_id=channel.id,
+        telegram_user_id="user_stage_2",
+        status="CONTACTED",
+        first_contacted_at=now - timedelta(hours=4),
+        created_at=now - timedelta(hours=5)
+    )
+    # 3. Stage 3: responded leaver with inbound message
+    c3 = RecoveryCase(
+        tenant_id=user.tenant_id,
+        channel_id=channel.id,
+        telegram_user_id="user_stage_3",
+        status="CONVERSATION_ACTIVE",
+        first_contacted_at=now - timedelta(hours=3),
+        last_response_at=now - timedelta(hours=2),
+        created_at=now - timedelta(hours=5)
+    )
+    # 4. Stage 4: recovered leaver
+    c4 = RecoveryCase(
+        tenant_id=user.tenant_id,
+        channel_id=channel.id,
+        telegram_user_id="user_stage_4",
+        status="RECOVERED",
+        first_contacted_at=now - timedelta(hours=3),
+        rejoined_at=now - timedelta(hours=1),
+        created_at=now - timedelta(hours=5)
+    )
+    db.add_all([c1, c2, c3, c4])
+    db.commit()
+    db.refresh(c3)
+
+    # Add messages to c3
+    m1 = RecoveryMessage(
+        case_id=c3.id,
+        direction="OUTBOUND",
+        sender_type="USERBOT",
+        text="مرحباً، هل خرجت بالخطأ؟",
+        sent_at=now - timedelta(hours=3)
+    )
+    m2 = RecoveryMessage(
+        case_id=c3.id,
+        direction="INBOUND",
+        sender_type="MEMBER",
+        text="بالغلط يا قلبي",
+        sent_at=now - timedelta(hours=2)
+    )
+    db.add_all([m1, m2])
+    db.commit()
+
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Test Stage 1: All 4
+    r1 = client.get(f"/api/v1/retention/cases?channel_id={channel.id}&stage=1", headers=headers)
+    assert r1.status_code == 200
+    assert len(r1.json()) == 4
+
+    # Test Stage 2: 3 contacted (c2, c3, c4)
+    r2 = client.get(f"/api/v1/retention/cases?channel_id={channel.id}&stage=2", headers=headers)
+    assert r2.status_code == 200
+    assert len(r2.json()) == 3
+
+    # Test Stage 3: 1 responded (c3)
+    r3 = client.get(f"/api/v1/retention/cases?channel_id={channel.id}&stage=3", headers=headers)
+    assert r3.status_code == 200
+    cases_s3 = r3.json()
+    assert len(cases_s3) == 1
+    assert cases_s3[0]["telegram_user_id"] == "user_stage_3"
+    assert cases_s3[0]["latest_inbound_text"] == "بالغلط يا قلبي"
+    assert cases_s3[0]["latest_message_text"] == "بالغلط يا قلبي"
+    assert cases_s3[0]["messages_count"] == 2
+
+    # Test Stage 4: 1 recovered (c4)
+    r4 = client.get(f"/api/v1/retention/cases?channel_id={channel.id}&stage=4", headers=headers)
+    assert r4.status_code == 200
+    assert len(r4.json()) == 1
+    assert r4.json()[0]["telegram_user_id"] == "user_stage_4"

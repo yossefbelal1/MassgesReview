@@ -268,14 +268,15 @@ def get_retention_summary(
 def get_recovery_cases(
     channel_id: Optional[str] = None,
     status_filter: Optional[str] = None,
+    stage: Optional[int] = None,
     search: Optional[str] = None,
-    limit: int = Query(50, le=100),
+    limit: int = Query(250, le=500),
     db: Session = Depends(get_db),
     tenant_id: str = Depends(get_current_tenant_id),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Returns list of member recovery cases with search and status filtering.
+    Returns list of member recovery cases with search, stage, and status filtering.
     """
     query = db.query(RecoveryCase).filter(RecoveryCase.tenant_id == tenant_id)
 
@@ -283,6 +284,35 @@ def get_recovery_cases(
         query = query.filter(RecoveryCase.channel_id == channel_id)
     if status_filter:
         query = query.filter(RecoveryCase.status == status_filter)
+
+    if stage == 1:
+        # Stage 1: All detected leavers
+        pass
+    elif stage == 2:
+        # Stage 2: Contacted leavers
+        query = query.filter(
+            or_(
+                RecoveryCase.first_contacted_at.isnot(None),
+                RecoveryCase.status.in_(["CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED", "RECOVERED"])
+            )
+        )
+    elif stage == 3:
+        # Stage 3: Engaged, responded, or active conversations
+        query = query.filter(
+            or_(
+                RecoveryCase.last_response_at.isnot(None),
+                RecoveryCase.status == "CONVERSATION_ACTIVE",
+                RecoveryCase.leave_reason_raw.isnot(None)
+            )
+        )
+    elif stage == 4:
+        # Stage 4: Recovered leavers who rejoined
+        query = query.filter(
+            or_(
+                RecoveryCase.status == "RECOVERED",
+                RecoveryCase.rejoined_at.isnot(None)
+            )
+        )
 
     query = query.order_by(desc(RecoveryCase.created_at))
     cases = query.limit(limit).all()
@@ -321,6 +351,9 @@ def get_recovery_cases(
         elif c.status == "UNCONTACTABLE":
             queue_reason = "حساب مقيد الخصوصية أو محذوف"
 
+        latest_msg = c.messages[-1] if c.messages else None
+        latest_inbound = next((m for m in reversed(c.messages) if m.direction == "INBOUND"), None)
+
         item = RecoveryCaseOut(
             id=c.id,
             tenant_id=c.tenant_id,
@@ -344,7 +377,12 @@ def get_recovery_cases(
             time_to_rejoin_seconds=c.time_to_rejoin_seconds,
             created_at=c.created_at,
             direct_telegram_link=direct_link,
-            queue_delay_reason=queue_reason
+            queue_delay_reason=queue_reason,
+            latest_message_text=latest_msg.text if latest_msg else None,
+            latest_inbound_text=latest_inbound.text if latest_inbound else None,
+            latest_message_direction=latest_msg.direction if latest_msg else None,
+            latest_message_time=latest_msg.sent_at if latest_msg else None,
+            messages_count=len(c.messages) if c.messages else 0
         )
         if search:
             s = search.lower()

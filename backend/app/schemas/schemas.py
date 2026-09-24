@@ -303,6 +303,11 @@ class RecoveryCaseOut(BaseModel):
     created_at: datetime
     direct_telegram_link: Optional[str] = None
     queue_delay_reason: Optional[str] = None
+    latest_message_text: Optional[str] = None
+    latest_inbound_text: Optional[str] = None
+    latest_message_direction: Optional[str] = None
+    latest_message_time: Optional[datetime] = None
+    messages_count: int = 0
     class Config:
         from_attributes = True
 

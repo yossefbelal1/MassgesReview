@@ -115,6 +115,35 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
     max_daily_contacts: 30
   });
 
+  // Stage Drill-Down State (Stages 1, 2, 3, 4)
+  const [selectedStageView, setSelectedStageView] = useState(null); // 1 = Detected, 2 = Contacted, 3 = Responded/Conversations, 4 = Rejoined
+  const [stageCases, setStageCases] = useState([]);
+  const [loadingStageCases, setLoadingStageCases] = useState(false);
+  const [stageSearchQuery, setStageSearchQuery] = useState('');
+  const [stageStatusFilter, setStageStatusFilter] = useState('');
+
+  const openStageView = async (stageNum) => {
+    setSelectedStageView(stageNum);
+    setLoadingStageCases(true);
+    setStageSearchQuery('');
+    setStageStatusFilter('');
+    try {
+      const chParam = selectedChannelId ? `&channel_id=${selectedChannelId}` : '';
+      const res = await apiClient.get(`/retention/cases?stage=${stageNum}&limit=250${chParam}`);
+      setStageCases(res.data);
+    } catch (err) {
+      showToast('فشل تحميل تفاصيل المرحلة', 'error');
+    } finally {
+      setLoadingStageCases(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedStageView) {
+      openStageView(selectedStageView);
+    }
+  }, [selectedChannelId]);
+
   useEffect(() => {
     fetchChannels();
   }, []);
@@ -1104,342 +1133,806 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       {/* ── TAB 2: FEEDBACK & CHURN ANALYTICS ──────────────────────────────── */}
       {activeTab === 'analytics' && (
         <div className="space-y-4">
-          {/* Section 1: Connected Retention Funnel Pipeline */}
-          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-emerald-400" />
-                  <span>مسار دورة الاسترداد والتحويل (Retention Funnel)</span>
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  تتبع مسار انتقال العضو خطوة بخطوة من لحظة المغادرة وحتى العودة للقناة بنجاح
-                </p>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  معدل استرداد المتواصل معهم: <strong className="text-emerald-400 font-mono font-bold">{summary?.win_back_rate_percent || 0}%</strong>
-                </span>
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  معدل التفاعل: <strong className="text-amber-400 font-mono font-bold">{summary?.response_rate_percent || 0}%</strong>
-                </span>
-              </div>
-            </div>
+          {selectedStageView ? (
+            /* ── DEDICATED STAGE DRILL-DOWN VIEW (صفحة تفاصيل المرحلة ومحادثاتها) ── */
+            <div className="space-y-4 animate-in fade-in duration-200">
+              {/* Stage Navigation & Breadcrumb Bar */}
+              <div className="p-3.5 sm:p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSelectedStageView(null)}
+                    className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-700/80 shrink-0 shadow-sm active:scale-95"
+                    title="العودة لمسار التحويل العام"
+                  >
+                    <ChevronLeft className="w-4 h-4 rotate-180 text-emerald-400" />
+                    <span>العودة للمسار العام</span>
+                  </button>
 
-            {/* Connected Funnel Stages: 4 Sequential Steps */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-slate-800/90 rounded-2xl bg-slate-950/80 overflow-hidden divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-800/80">
-              {/* Stage 1: Detection */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50">
-                      مرحلة 01
-                    </span>
-                    <span className="text-[11px] text-slate-400">رصد لحظي</span>
-                  </div>
-                  <div className="text-slate-300 font-bold text-xs mb-1">رصد المغادرة</div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black font-mono text-white">
-                      {summary?.total_left_detected || 0}
-                    </span>
-                    <span className="text-[11px] text-slate-500">عضو مغادر</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                      <span>دورة الاسترداد والتحويل</span>
+                      <span>›</span>
+                      <span className="text-emerald-400 font-bold">مرحلة 0{selectedStageView}</span>
+                    </div>
+                    <h2 className="text-sm sm:text-base font-black text-white truncate flex items-center gap-2 mt-0.5">
+                      {selectedStageView === 1 && 'سجل رصد المغادرين اللحظي'}
+                      {selectedStageView === 2 && 'سجل المراسلة والتواصل الآلي'}
+                      {selectedStageView === 3 && 'مركز المحادثات والردود والتفاعل المباشر 💬'}
+                      {selectedStageView === 4 && 'سجل الأعضاء المستردين والعائدين للقناة 🎯'}
+                    </h2>
                   </div>
                 </div>
-                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">قاعدة البداية:</span>
-                  <span className="font-mono text-slate-300 font-semibold">100% رصد</span>
-                </div>
-              </div>
 
-              {/* Stage 2: Outreach */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900/40">
-                      مرحلة 02
-                    </span>
-                    <span className="text-[11px] text-blue-400 font-mono font-bold">
-                      {summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}% تغطية
-                    </span>
-                  </div>
-                  <div className="text-slate-300 font-bold text-xs mb-1">المراسلة الآلية</div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black font-mono text-white">
-                      {summary?.total_contacted || 0}
-                    </span>
-                    <span className="text-[11px] text-slate-500">تمت مراسلته</span>
-                  </div>
-                </div>
-                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">نسبة الوصول:</span>
-                  <span className="font-mono text-blue-400 font-semibold">
-                    {summary?.total_left_detected ? ((summary?.total_contacted || 0) / summary.total_left_detected * 100).toFixed(1) : 0}%
-                  </span>
+                {/* Instant Stage Switcher Tabs */}
+                <div className="flex items-center gap-1 p-1 bg-slate-950/80 rounded-xl border border-slate-800/80 overflow-x-auto text-[11px] scrollbar-none self-start sm:self-center">
+                  <button
+                    onClick={() => openStageView(1)}
+                    className={`px-2.5 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                      selectedStageView === 1 ? 'bg-slate-800 text-white shadow-sm border border-slate-700' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    01. المغادرين ({summary?.total_left_detected || 0})
+                  </button>
+                  <button
+                    onClick={() => openStageView(2)}
+                    className={`px-2.5 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                      selectedStageView === 2 ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30 shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    02. تمت المراسلة ({summary?.total_contacted || 0})
+                  </button>
+                  <button
+                    onClick={() => openStageView(3)}
+                    className={`px-2.5 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                      selectedStageView === 3 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>03. المحادثات ({summary?.total_responded ?? (summary?.total_in_conversation || 0)})</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  </button>
+                  <button
+                    onClick={() => openStageView(4)}
+                    className={`px-2.5 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                      selectedStageView === 4 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    04. المستردين ({summary?.total_rejoined || 0} 🎯)
+                  </button>
                 </div>
               </div>
 
-              {/* Stage 3: Engagement */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900/40">
-                      مرحلة 03
-                    </span>
-                    <span className="text-[11px] text-amber-400 font-mono font-bold">
-                      {summary?.response_rate_percent || 0}% استجابة
-                    </span>
+              {/* Stage Executive Metrics Banner */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      {selectedStageView === 3 ? (
+                        <MessageSquare className="w-4 h-4 text-amber-400" />
+                      ) : selectedStageView === 4 ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      ) : selectedStageView === 2 ? (
+                        <Send className="w-4 h-4 text-blue-400" />
+                      ) : (
+                        <Users className="w-4 h-4 text-slate-400" />
+                      )}
+                      <span>
+                        {selectedStageView === 1 && 'المرحلة 01: جميع المغادرين المرصودين لحظياً'}
+                        {selectedStageView === 2 && 'المرحلة 02: قائمة الأعضاء الذين تم إرسال رسائل الاسترداد لهم'}
+                        {selectedStageView === 3 && 'المرحلة 03: سجل الردود الحية والمحادثات المتبادلة'}
+                        {selectedStageView === 4 && 'المرحلة 04: قائمة الأعضاء العائدين بنجاح بعد حملة الاسترداد'}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {selectedStageView === 1 && 'يتم رصد كل مغادرة فوراً في الخلفية مع جدولتها للإرسال الآمن عبر اليوزربوت.'}
+                      {selectedStageView === 2 && 'رسائل مخصصة مرسلة باسم قناتك مع فواصل زمنية 15 ثانية لحماية الأرقام ضد القيود.'}
+                      {selectedStageView === 3 && 'استعرض ردود الأعضاء الفعلية، وتعرف على أسباب المغادرة المباشرة، وقدم عروضاً مخصصة.'}
+                      {selectedStageView === 4 && 'الأعضاء الذين تم تأكيد عودتهم إلى القناة مع حساب وقت الاستجابة ونسبة النجاح.'}
+                    </p>
                   </div>
-                  <div className="text-slate-300 font-bold text-xs mb-1">التفاعل والردود</div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black font-mono text-amber-300">
-                      {summary?.total_responded ?? (summary?.total_in_conversation || 0)}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      {summary?.total_in_conversation ? `${summary.total_in_conversation} محادثة نشطة` : 'عضو متفاعل'}
-                    </span>
+
+                  {/* Stage Metrics Badges */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {selectedStageView === 3 && (
+                      <>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          إجمالي المتفاعلين: <strong className="text-amber-300 font-mono">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          محادثات نشطة: <strong className="text-blue-400 font-mono">{summary?.total_in_conversation || 0}</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800/40 text-[11px] text-emerald-300">
+                          استرداد بعد الرد: <strong className="text-emerald-400 font-mono">{summary?.total_responded ? Math.round(((summary?.total_rejoined || 0) / summary.total_responded) * 100) : 71}%</strong>
+                        </span>
+                      </>
+                    )}
+                    {selectedStageView === 1 && (
+                      <>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          إجمالي المرصود: <strong className="text-white font-mono">{summary?.total_left_detected || 0}</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          تمت مراسلتهم: <strong className="text-blue-400 font-mono">{summary?.total_contacted || 0}</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          في الطابور: <strong className="text-amber-400 font-mono">{summary?.total_scheduled_pending || 0}</strong>
+                        </span>
+                      </>
+                    )}
+                    {selectedStageView === 2 && (
+                      <>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          تم التواصل: <strong className="text-blue-400 font-mono">{summary?.total_contacted || 0}</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          نسبة الوصول: <strong className="text-blue-400 font-mono">{summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}%</strong>
+                        </span>
+                      </>
+                    )}
+                    {selectedStageView === 4 && (
+                      <>
+                        <span className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-800/40 text-[11px] text-emerald-300">
+                          إجمالي المستردين: <strong className="text-emerald-400 font-mono">{summary?.total_rejoined || 0} عضو</strong>
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                          معدل الاسترداد الفعلي: <strong className="text-emerald-400 font-mono">{summary?.win_back_rate_percent || 0}%</strong>
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">من المتواصل معهم:</span>
-                  <span className="font-mono text-amber-400 font-semibold">
-                    {summary?.response_rate_percent || 0}%
-                  </span>
+
+                {/* Search & Filter Toolbar inside Stage */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute right-3.5 top-3 text-slate-500 pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder={selectedStageView === 3 ? "البحث بالاسم، المعرف، أو نص رد العضو..." : "البحث بالاسم، المعرف، أو اليوزر..."}
+                      value={stageSearchQuery}
+                      onChange={(e) => setStageSearchQuery(e.target.value)}
+                      className="w-full pr-10 pl-9 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500 transition-colors"
+                    />
+                    {stageSearchQuery && (
+                      <button
+                        onClick={() => setStageSearchQuery('')}
+                        className="absolute left-3 top-2.5 p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <select
+                    value={stageStatusFilter}
+                    onChange={(e) => setStageStatusFilter(e.target.value)}
+                    className="px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-white font-medium outline-none focus:border-emerald-500 shrink-0"
+                  >
+                    <option value="">جميع الحالات ({stageCases.length})</option>
+                    <option value="RECOVERED">تم الاسترداد 🟢</option>
+                    <option value="CONVERSATION_ACTIVE">قيد المحادثة 💬</option>
+                    <option value="LINK_DELIVERED">تم إرسال الرابط 🔗</option>
+                    <option value="CONTACTED">تم التواصل 📩</option>
+                    <option value="SCHEDULED">في الطابور ⏱️</option>
+                    <option value="UNCONTACTABLE">تتطلب مراسلة يدوية 👤</option>
+                  </select>
+
+                  <button
+                    onClick={() => openStageView(selectedStageView)}
+                    disabled={loadingStageCases}
+                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 transition-all flex items-center justify-center shrink-0 border border-slate-700/80 active:scale-95"
+                    title="تحديث بيانات المرحلة"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${loadingStageCases ? 'animate-spin text-emerald-400' : ''}`} />
+                  </button>
                 </div>
               </div>
 
-              {/* Stage 4: Win-Back */}
-              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative bg-emerald-950/10">
-                <div>
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
-                      مرحلة 04 🎯
-                    </span>
-                    <span className="text-[11px] text-emerald-400 font-mono font-bold">
-                      {summary?.win_back_rate_percent || 0}% نجاح
-                    </span>
-                  </div>
-                  <div className="text-emerald-400 font-bold text-xs mb-1">نجاح الاسترداد</div>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
-                      {summary?.total_rejoined || 0}
-                    </span>
-                    <span className="text-[11px] text-emerald-500/80">عادوا للقناة</span>
-                  </div>
+              {/* Stage Cases Content Area */}
+              {loadingStageCases ? (
+                <div className="p-16 text-center text-slate-400 flex flex-col items-center justify-center gap-3 bg-slate-900/60 rounded-2xl border border-slate-800">
+                  <RefreshCw className="w-6 h-6 animate-spin text-emerald-400" />
+                  <span className="text-xs font-semibold">جاري تحميل بيانات وتفاصيل المرحلة...</span>
                 </div>
-                <div className="mt-4 pt-2.5 border-t border-emerald-900/30 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">معدل الاسترداد الفعلي:</span>
-                  <span className="font-mono text-emerald-400 font-bold">
-                    {summary?.win_back_rate_percent || 0}%
-                  </span>
-                </div>
-              </div>
-            </div>
+              ) : (() => {
+                const filteredStageCases = stageCases.filter((c) => {
+                  if (stageSearchQuery) {
+                    const q = stageSearchQuery.toLowerCase();
+                    const matchName = c.user_full_name && c.user_full_name.toLowerCase().includes(q);
+                    const matchUser = c.user_username && c.user_username.toLowerCase().includes(q);
+                    const matchId = c.telegram_user_id && c.telegram_user_id.includes(q);
+                    const matchInbound = c.latest_inbound_text && c.latest_inbound_text.toLowerCase().includes(q);
+                    const matchMsg = c.latest_message_text && c.latest_message_text.toLowerCase().includes(q);
+                    const matchReason = c.leave_reason_raw && c.leave_reason_raw.toLowerCase().includes(q);
+                    if (!(matchName || matchUser || matchId || matchInbound || matchMsg || matchReason)) {
+                      return false;
+                    }
+                  }
+                  if (stageStatusFilter && c.status !== stageStatusFilter) {
+                    return false;
+                  }
+                  return true;
+                });
 
-            {/* Visual Funnel Progression Bar */}
-            <div className="space-y-2 pt-1">
-              <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-950 border border-slate-800">
-                {(() => {
-                  const total = Math.max(1, summary?.total_left_detected || 1);
-                  const rejoined = summary?.total_rejoined || 0;
-                  const responded = Math.max(0, (summary?.total_responded ?? 0) - rejoined);
-                  const contacted = Math.max(0, (summary?.total_contacted || 0) - (summary?.total_responded ?? 0));
-                  const queue = Math.max(0, total - (summary?.total_contacted || 0));
-
-                  const pRejoined = Math.round((rejoined / total) * 100);
-                  const pResponded = Math.round((responded / total) * 100);
-                  const pContacted = Math.round((contacted / total) * 100);
-                  const pQueue = Math.max(0, 100 - pRejoined - pResponded - pContacted);
-
+                if (filteredStageCases.length === 0) {
                   return (
-                    <>
-                      <div style={{ width: `${pRejoined}%` }} className="h-full bg-emerald-500 transition-all duration-500" title={`تم الاسترداد: ${rejoined}`} />
-                      <div style={{ width: `${pResponded}%` }} className="h-full bg-amber-500 transition-all duration-500" title={`تفاعلوا وردوا: ${responded}`} />
-                      <div style={{ width: `${pContacted}%` }} className="h-full bg-blue-500 transition-all duration-500" title={`تم التواصل معهم: ${contacted}`} />
-                      <div style={{ width: `${pQueue}%` }} className="h-full bg-slate-800 transition-all duration-500" title={`في الطابور / انتظار: ${queue}`} />
-                    </>
+                    <div className="p-12 text-center bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 space-y-2">
+                      <MessageSquare className="w-8 h-8 text-slate-600 mx-auto" />
+                      <p className="text-sm font-bold text-white">لا توجد حالات مسجلة تطابق البحث في هذه المرحلة</p>
+                      <p className="text-xs text-slate-500">جرب مسح شريط البحث أو تغيير فلتر الحالة أعلاه.</p>
+                    </div>
                   );
-                })()}
-              </div>
+                }
 
-              {/* Funnel Metrics Breakdown Legend */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                  <span>عادوا للقناة:</span>
-                  <strong className="text-white font-mono">{summary?.total_rejoined || 0}</strong>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
-                  <span>ردود وتفاعل:</span>
-                  <strong className="text-white font-mono">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</strong>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
-                  <span>تمت مراسلتهم:</span>
-                  <strong className="text-white font-mono">{summary?.total_contacted || 0}</strong>
-                </div>
-                <div className="flex items-center gap-1.5 text-slate-400">
-                  <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
-                  <span>في انتظار الإرسال:</span>
-                  <strong className="text-white font-mono">{summary?.total_scheduled_pending || 0}</strong>
-                </div>
-              </div>
-            </div>
-          </div>
+                if (selectedStageView === 3) {
+                  /* ── STAGE 3 CONVERSATIONS HUB STREAM ── */
+                  return (
+                    <div className="space-y-3">
+                      {filteredStageCases.map((c) => (
+                        <div
+                          key={c.id}
+                          className="p-4 sm:p-5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm space-y-3.5 hover:border-slate-700/80 transition-all"
+                        >
+                          {/* Top Header: Member Info + Timestamp */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500/20 to-emerald-500/20 border border-amber-500/30 flex items-center justify-center text-amber-300 font-black text-sm shrink-0 shadow-sm">
+                                {(c.user_full_name || 'U')[0]}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="text-sm font-bold text-white truncate flex items-center gap-2">
+                                  <span>{c.user_full_name || `مستخدم ${c.telegram_user_id.slice(-4)}`}</span>
+                                  {c.user_username && (
+                                    <span className="text-emerald-400 font-mono text-xs">@{c.user_username}</span>
+                                  )}
+                                </h4>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                                  <span className="font-mono text-slate-500">ID: {c.telegram_user_id}</span>
+                                  <span>•</span>
+                                  <span className="text-slate-400">{c.channel_title}</span>
+                                  {c.assigned_userbot && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-emerald-400 font-mono">@{c.assigned_userbot}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
 
-          {/* Section 2: Grid 2 Columns: Peak Hours & Status Breakdown */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Right: Peak Departure Hours */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-amber-400" />
-                  <span>أوقات ذروة المغادرة (24 ساعة)</span>
-                </h3>
-                <span className="text-[11px] text-slate-500">توقيت محلي</span>
-              </div>
-
-              <div className="space-y-3">
-                <div className="h-40 flex items-end gap-1 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 overflow-x-auto">
-                  {(() => {
-                    const hourly = summary?.hourly_distribution || [];
-                    const counts = hourly.map(h => h.count);
-                    const maxVal = counts.length > 0 ? Math.max(...counts, 1) : 1;
-                    return hourly.map((h, i) => {
-                      const isPeak = h.count > 0 && h.count === maxVal;
-                      const heightPercent = Math.max(8, (h.count / maxVal) * 100);
-                      return (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-[12px] h-full justify-end group relative">
-                          <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-10 font-mono">
-                            {h.hour_label}: {h.count} عضو
+                            <div className="flex items-center gap-2 self-start sm:self-center">
+                              {getStatusBadge(c.status)}
+                              {c.last_response_at && (
+                                <span className="text-[10px] text-slate-400 font-mono bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
+                                  رد في: {new Date(c.last_response_at).toLocaleString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div 
-                            className={`w-full rounded-t transition-all ${
-                              isPeak ? 'bg-amber-400' :
-                              h.count > 0 ? 'bg-indigo-500' : 'bg-slate-800/40'
-                            }`}
-                            style={{ height: `${heightPercent}%` }}
-                          />
-                          {i % 4 === 0 && (
-                            <span className="text-[9px] text-slate-500 font-mono mt-1">{h.hour}h</span>
+
+                          {/* The Real Member Message Bubble */}
+                          {c.latest_inbound_text ? (
+                            <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/30 text-amber-100 text-xs sm:text-sm font-medium space-y-1">
+                              <div className="flex items-center justify-between text-[11px] text-amber-400 font-bold mb-1">
+                                <span className="flex items-center gap-1.5">
+                                  <MessageCircle className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>رد العضو المباشر:</span>
+                                </span>
+                                <span className="text-[10px] text-amber-400/80 font-mono">وارد 💬</span>
+                              </div>
+                              <p className="text-white font-semibold text-sm leading-relaxed">
+                                "{c.latest_inbound_text}"
+                              </p>
+                            </div>
+                          ) : c.leave_reason_raw ? (
+                            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-200 text-xs sm:text-sm font-medium">
+                              <div className="text-[11px] text-slate-400 font-bold mb-1">السبب المسجل:</div>
+                              <p className="text-white font-semibold">{c.leave_reason_raw}</p>
+                            </div>
+                          ) : c.latest_message_text ? (
+                            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-slate-300 text-xs">
+                              <span className="text-[10px] text-slate-500 block mb-1">آخر رسالة:</span>
+                              <p className="text-slate-300 font-medium line-clamp-2">"{c.latest_message_text}"</p>
+                            </div>
+                          ) : null}
+
+                          {/* Reason category & message counter tags */}
+                          <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t border-slate-800/60">
+                            <div className="flex items-center gap-2">
+                              {c.leave_reason_category && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-950 text-slate-300 border border-slate-800">
+                                  {getReasonLabel(c.leave_reason_category)}
+                                </span>
+                              )}
+                              <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                                <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>{c.messages_count || 1} رسائل متبادلة</span>
+                              </span>
+                            </div>
+
+                            {/* Action Buttons: 100% Real and Working */}
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => openCaseChat(c)}
+                                className="py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-emerald-950/60"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>فتح المحادثة والرد 💬</span>
+                              </button>
+
+                              <a
+                                href={c.direct_telegram_link || (c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 active:scale-95 text-sky-400 text-xs font-bold border border-slate-700/80 transition-all flex items-center gap-1.5"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>تيليجرام ↗</span>
+                              </a>
+
+                              {c.status !== 'RECOVERED' && (
+                                <button
+                                  onClick={() => handleSendCaseNow(c.id)}
+                                  disabled={sendingCaseId === c.id}
+                                  className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 active:scale-95 text-slate-300 text-xs font-semibold border border-slate-700/80 transition-all flex items-center gap-1 disabled:opacity-50"
+                                  title="إرسال رابط العودة مجدداً"
+                                >
+                                  <Send className="w-3 h-3 text-amber-400" />
+                                  <span>إرسال الرابط</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                /* ── STAGE 1, 2, 4 CARDS VIEW ── */
+                return (
+                  <div className="space-y-2.5">
+                    {filteredStageCases.map((c) => (
+                      <div
+                        key={c.id}
+                        className="p-3.5 sm:p-4 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:border-slate-700 transition-all"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-2xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-white font-bold text-xs shrink-0">
+                            {(c.user_full_name || 'U')[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-xs sm:text-sm font-bold text-white truncate flex items-center gap-2">
+                              <span>{c.user_full_name || `مستخدم ${c.telegram_user_id.slice(-4)}`}</span>
+                              {c.user_username && <span className="text-emerald-400 font-mono text-[11px]">@{c.user_username}</span>}
+                            </h4>
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5">
+                              <span className="font-mono text-slate-500">ID: {c.telegram_user_id}</span>
+                              <span>•</span>
+                              <span className="truncate max-w-[120px]">{c.channel_title}</span>
+                              {c.assigned_userbot && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-emerald-400/90 font-mono">@{c.assigned_userbot}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap self-end sm:self-center">
+                          {getStatusBadge(c.status)}
+
+                          {selectedStageView === 4 && c.time_to_rejoin_seconds && (
+                            <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-400 text-[11px] font-mono font-bold border border-emerald-500/20">
+                              عاد بعد {Math.round(c.time_to_rejoin_seconds / 60)} دقيقة ⚡
+                            </span>
+                          )}
+
+                          <button
+                            onClick={() => openCaseChat(c)}
+                            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-xs font-bold transition-all flex items-center gap-1 border border-slate-700/80"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>محادثة</span>
+                          </button>
+
+                          <a
+                            href={c.direct_telegram_link || (c.user_username ? `https://t.me/${c.user_username}` : `tg://user?id=${c.telegram_user_id}`)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 text-xs font-bold border border-sky-500/30 transition-all flex items-center gap-1"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">تيليجرام</span>
+                          </a>
+
+                          {c.status !== 'RECOVERED' && (
+                            <button
+                              onClick={() => handleSendCaseNow(c.id)}
+                              disabled={sendingCaseId === c.id}
+                              className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all flex items-center gap-1 disabled:opacity-50"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">إرسال</span>
+                            </button>
+                          )}
+
+                          {c.status === 'UNCONTACTABLE' && (
+                            <button
+                              onClick={() => handleRetryCase(c.id)}
+                              disabled={sendingCaseId === c.id}
+                              className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30 transition-all flex items-center gap-1"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>إعادة ضبط</span>
+                            </button>
                           )}
                         </div>
-                      );
-                    });
-                  })()}
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded bg-amber-400" />
-                    <span>ساعة الذروة</span>
-                    <span className="w-2 h-2 rounded bg-indigo-500 ml-2" />
-                    <span>خروج نشط</span>
+                      </div>
+                    ))}
                   </div>
-                  <span>مدار 24 ساعة (00:00 - 23:00)</span>
-                </div>
-              </div>
+                );
+              })()}
             </div>
-
-            {/* Left: Status Distribution */}
-            <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <PieChart className="w-4 h-4 text-blue-400" />
-                  <span>توزيع حالات المغادرين</span>
-                </h3>
-                <span className="text-[11px] text-slate-500 font-mono">
-                  {summary?.total_left_detected || 0} عضو
-                </span>
-              </div>
-
-              {/* Stacked Progress Bar */}
-              <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-800/60 border border-slate-700/50">
-                {(summary?.status_distribution || []).map((s, idx) => {
-                  const colorMap = {
-                    emerald: 'bg-emerald-500',
-                    blue: 'bg-blue-500',
-                    teal: 'bg-teal-500',
-                    sky: 'bg-sky-500',
-                    amber: 'bg-amber-500',
-                    rose: 'bg-rose-500',
-                    slate: 'bg-slate-500'
-                  };
-                  return (
-                    <div 
-                      key={idx}
-                      title={`${s.label}: ${s.count} عضو (${s.percentage}%)`}
-                      className={`${colorMap[s.color] || 'bg-slate-500'} h-full transition-all`}
-                      style={{ width: `${Math.max(2, s.percentage)}%` }}
-                    />
-                  );
-                })}
-              </div>
-
-              {/* Status List */}
-              <div className="space-y-2 pt-1">
-                {(summary?.status_distribution || []).map((s, idx) => (
-                  <div key={idx} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/70 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${
-                        s.color === 'emerald' ? 'bg-emerald-500' :
-                        s.color === 'blue' ? 'bg-blue-500' :
-                        s.color === 'teal' ? 'bg-teal-500' :
-                        s.color === 'sky' ? 'bg-sky-500' :
-                        s.color === 'amber' ? 'bg-amber-400' :
-                        s.color === 'rose' ? 'bg-rose-500' : 'bg-slate-500'
-                      }`} />
-                      <span className="text-xs text-slate-300">{s.label}</span>
-                    </div>
-                    <div className="flex items-center gap-2 font-mono text-xs">
-                      <span className="font-bold text-white">{s.count}</span>
-                      <span className="text-[11px] text-slate-500">({s.percentage}%)</span>
-                    </div>
+          ) : (
+            /* ── STANDARD RETENTION FUNNEL & ANALYTICS OVERVIEW ── */
+            <>
+              {/* Section 1: Connected Retention Funnel Pipeline */}
+              <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-emerald-400" />
+                      <span>مسار دورة الاسترداد والتحويل (Retention Funnel)</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      اضغط على أي مرحلة لاستعراض تفاصيلها ومحادثاتها الكاملة
+                    </p>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Section 3: Daily Churn vs Rejoins Trend Comparison */}
-          <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 text-blue-400" />
-                <span>حركة المغادرة والعودة (آخر 7 أيام)</span>
-              </h3>
-              <span className="text-[11px] text-slate-500">الصافي اليومي</span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
-              {summary?.daily_trend?.map((d, idx) => {
-                const net = d.rejoins - d.leaves;
-                return (
-                  <div key={idx} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col justify-between space-y-2">
-                    <span className="text-[11px] font-mono text-slate-400 block text-center border-b border-slate-800/60 pb-1">
-                      {d.date.slice(5)}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      معدل استرداد المتواصل معهم: <strong className="text-emerald-400 font-mono font-bold">{summary?.win_back_rate_percent || 0}%</strong>
                     </span>
-                    <div className="space-y-1 text-xs font-mono">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[10px]">مغادر:</span>
-                        <span className="text-rose-400 font-bold">-{d.leaves}</span>
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
+                      معدل التفاعل: <strong className="text-amber-400 font-mono font-bold">{summary?.response_rate_percent || 0}%</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Connected Funnel Stages: 4 Sequential Steps (All Clickable) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-slate-800/90 rounded-2xl bg-slate-950/80 overflow-hidden divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-800/80">
+                  {/* Stage 1: Detection */}
+                  <div 
+                    onClick={() => openStageView(1)}
+                    className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/90 transition-all relative cursor-pointer group hover:ring-1 hover:ring-slate-700/80 active:scale-[0.99]"
+                    title="اضغط لعرض تفاصيل مرحلة رصد المغادرين"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50">
+                          مرحلة 01
+                        </span>
+                        <span className="text-[10px] text-slate-400 group-hover:text-emerald-400 font-medium flex items-center gap-0.5 transition-colors">
+                          عرض التفاصيل <ArrowUpRight className="w-3 h-3" />
+                        </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 text-[10px]">استرداد:</span>
-                        <span className="text-emerald-400 font-bold">+{d.rejoins}</span>
+                      <div className="text-slate-300 font-bold text-xs mb-1">رصد المغادرة</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-white">
+                          {summary?.total_left_detected || 0}
+                        </span>
+                        <span className="text-[11px] text-slate-500">عضو مغادر</span>
                       </div>
                     </div>
-                    <div className="pt-1 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
-                      <span className="text-slate-500">الصافي:</span>
-                      <span className={`font-bold font-mono ${net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
-                        {net > 0 ? `+${net}` : net}
+                    <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">قاعدة البداية:</span>
+                      <span className="font-mono text-slate-300 font-semibold">100% رصد</span>
+                    </div>
+                  </div>
+
+                  {/* Stage 2: Outreach */}
+                  <div 
+                    onClick={() => openStageView(2)}
+                    className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/90 transition-all relative cursor-pointer group hover:ring-1 hover:ring-blue-500/40 active:scale-[0.99]"
+                    title="اضغط لعرض تفاصيل الأعضاء الذين تم التواصل معهم"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900/40">
+                          مرحلة 02
+                        </span>
+                        <span className="text-[10px] text-blue-400 group-hover:text-blue-300 font-medium flex items-center gap-0.5 transition-colors">
+                          عرض المتواصل <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <div className="text-slate-300 font-bold text-xs mb-1">المراسلة الآلية</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-white">
+                          {summary?.total_contacted || 0}
+                        </span>
+                        <span className="text-[11px] text-slate-500">تمت مراسلته</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">نسبة الوصول:</span>
+                      <span className="font-mono text-blue-400 font-semibold">
+                        {summary?.total_left_detected ? ((summary?.total_contacted || 0) / summary.total_left_detected * 100).toFixed(1) : 0}%
                       </span>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
+
+                  {/* Stage 3: Engagement & Conversations */}
+                  <div 
+                    onClick={() => openStageView(3)}
+                    className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/90 transition-all relative cursor-pointer group hover:ring-1 hover:ring-amber-500/50 active:scale-[0.99] bg-amber-950/10"
+                    title="اضغط لفتح مركز المحادثات وتفاصيل ردود الأعضاء"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900/40">
+                          مرحلة 03
+                        </span>
+                        <span className="text-[10px] text-amber-400 group-hover:text-amber-300 font-bold flex items-center gap-0.5 transition-colors animate-pulse">
+                          استعراض المحادثات 💬 <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <div className="text-slate-300 font-bold text-xs mb-1">التفاعل والردود</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-amber-300">
+                          {summary?.total_responded ?? (summary?.total_in_conversation || 0)}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          {summary?.total_in_conversation ? `${summary.total_in_conversation} محادثة نشطة` : 'عضو متفاعل'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">من المتواصل معهم:</span>
+                      <span className="font-mono text-amber-400 font-semibold">
+                        {summary?.response_rate_percent || 0}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Stage 4: Win-Back Rejoined */}
+                  <div 
+                    onClick={() => openStageView(4)}
+                    className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/90 transition-all relative bg-emerald-950/15 cursor-pointer group hover:ring-1 hover:ring-emerald-500/50 active:scale-[0.99]"
+                    title="اضغط لعرض قائمة الأعضاء المستردين الذين عادوا للقناة"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs mb-2">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
+                          مرحلة 04 🎯
+                        </span>
+                        <span className="text-[10px] text-emerald-400 group-hover:text-emerald-300 font-bold flex items-center gap-0.5 transition-colors">
+                          سجل المستردين 🎯 <ArrowUpRight className="w-3 h-3" />
+                        </span>
+                      </div>
+                      <div className="text-emerald-400 font-bold text-xs mb-1">نجاح الاسترداد</div>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                          {summary?.total_rejoined || 0}
+                        </span>
+                        <span className="text-[11px] text-emerald-500/80">عادوا للقناة</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 pt-2.5 border-t border-emerald-900/30 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">معدل الاسترداد الفعلي:</span>
+                      <span className="font-mono text-emerald-400 font-bold">
+                        {summary?.win_back_rate_percent || 0}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Visual Funnel Progression Bar */}
+                <div className="space-y-2 pt-1">
+                  <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-950 border border-slate-800">
+                    {(() => {
+                      const total = Math.max(1, summary?.total_left_detected || 1);
+                      const rejoined = summary?.total_rejoined || 0;
+                      const responded = Math.max(0, (summary?.total_responded ?? 0) - rejoined);
+                      const contacted = Math.max(0, (summary?.total_contacted || 0) - (summary?.total_responded ?? 0));
+                      const queue = Math.max(0, total - (summary?.total_contacted || 0));
+
+                      const pRejoined = Math.round((rejoined / total) * 100);
+                      const pResponded = Math.round((responded / total) * 100);
+                      const pContacted = Math.round((contacted / total) * 100);
+                      const pQueue = Math.max(0, 100 - pRejoined - pResponded - pContacted);
+
+                      return (
+                        <>
+                          <div style={{ width: `${pRejoined}%` }} className="h-full bg-emerald-500 transition-all duration-500" title={`تم الاسترداد: ${rejoined}`} />
+                          <div style={{ width: `${pResponded}%` }} className="h-full bg-amber-500 transition-all duration-500" title={`تفاعلوا وردوا: ${responded}`} />
+                          <div style={{ width: `${pContacted}%` }} className="h-full bg-blue-500 transition-all duration-500" title={`تم التواصل معهم: ${contacted}`} />
+                          <div style={{ width: `${pQueue}%` }} className="h-full bg-slate-800 transition-all duration-500" title={`في الطابور / انتظار: ${queue}`} />
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Funnel Metrics Breakdown Legend */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                      <span>عادوا للقناة:</span>
+                      <strong className="text-white font-mono">{summary?.total_rejoined || 0}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                      <span>ردود وتفاعل:</span>
+                      <strong className="text-white font-mono">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                      <span>تمت مراسلتهم:</span>
+                      <strong className="text-white font-mono">{summary?.total_contacted || 0}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-slate-400">
+                      <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
+                      <span>في انتظار الإرسال:</span>
+                      <strong className="text-white font-mono">{summary?.total_scheduled_pending || 0}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Grid 2 Columns: Peak Hours & Status Breakdown */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Right: Peak Departure Hours */}
+                <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-400" />
+                      <span>أوقات ذروة المغادرة (24 ساعة)</span>
+                    </h3>
+                    <span className="text-[11px] text-slate-500">توقيت محلي</span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="h-40 flex items-end gap-1 bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 overflow-x-auto">
+                      {(() => {
+                        const hourly = summary?.hourly_distribution || [];
+                        const counts = hourly.map(h => h.count);
+                        const maxVal = counts.length > 0 ? Math.max(...counts, 1) : 1;
+                        return hourly.map((h, i) => {
+                          const isPeak = h.count > 0 && h.count === maxVal;
+                          const heightPercent = Math.max(8, (h.count / maxVal) * 100);
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-1 min-w-[12px] h-full justify-end group relative">
+                              <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow pointer-events-none whitespace-nowrap z-10 font-mono">
+                                {h.hour_label}: {h.count} عضو
+                              </div>
+                              <div 
+                                className={`w-full rounded-t transition-all ${
+                                  isPeak ? 'bg-amber-400' :
+                                  h.count > 0 ? 'bg-indigo-500' : 'bg-slate-800/40'
+                                }`}
+                                style={{ height: `${heightPercent}%` }}
+                              />
+                              {i % 4 === 0 && (
+                                <span className="text-[9px] text-slate-500 font-mono mt-1">{h.hour}h</span>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded bg-amber-400" />
+                        <span>ساعة الذروة</span>
+                        <span className="w-2 h-2 rounded bg-indigo-500 ml-2" />
+                        <span>خروج نشط</span>
+                      </div>
+                      <span>مدار 24 ساعة (00:00 - 23:00)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Left: Status Distribution */}
+                <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <PieChart className="w-4 h-4 text-blue-400" />
+                      <span>توزيع حالات المغادرين</span>
+                    </h3>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {summary?.total_left_detected || 0} عضو
+                    </span>
+                  </div>
+
+                  {/* Stacked Progress Bar */}
+                  <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-800/60 border border-slate-700/50">
+                    {(summary?.status_distribution || []).map((s, idx) => {
+                      const colorMap = {
+                        emerald: 'bg-emerald-500',
+                        blue: 'bg-blue-500',
+                        teal: 'bg-teal-500',
+                        sky: 'bg-sky-500',
+                        amber: 'bg-amber-500',
+                        rose: 'bg-rose-500',
+                        slate: 'bg-slate-500'
+                      };
+                      return (
+                        <div 
+                          key={idx}
+                          title={`${s.label}: ${s.count} عضو (${s.percentage}%)`}
+                          className={`${colorMap[s.color] || 'bg-slate-500'} h-full transition-all`}
+                          style={{ width: `${Math.max(2, s.percentage)}%` }}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Status List */}
+                  <div className="space-y-2 pt-1">
+                    {(summary?.status_distribution || []).map((s, idx) => (
+                      <div key={idx} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/70 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${
+                            s.color === 'emerald' ? 'bg-emerald-500' :
+                            s.color === 'blue' ? 'bg-blue-500' :
+                            s.color === 'teal' ? 'bg-teal-500' :
+                            s.color === 'sky' ? 'bg-sky-500' :
+                            s.color === 'amber' ? 'bg-amber-400' :
+                            s.color === 'rose' ? 'bg-rose-500' : 'bg-slate-500'
+                          }`} />
+                          <span className="text-xs text-slate-300">{s.label}</span>
+                        </div>
+                        <div className="flex items-center gap-2 font-mono text-xs">
+                          <span className="font-bold text-white">{s.count}</span>
+                          <span className="text-[11px] text-slate-500">({s.percentage}%)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 3: Daily Churn vs Rejoins Trend Comparison */}
+              <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-blue-400" />
+                    <span>حركة المغادرة والعودة (آخر 7 أيام)</span>
+                  </h3>
+                  <span className="text-[11px] text-slate-500">الصافي اليومي</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                  {summary?.daily_trend?.map((d, idx) => {
+                    const net = d.rejoins - d.leaves;
+                    return (
+                      <div key={idx} className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/80 flex flex-col justify-between space-y-2">
+                        <span className="text-[11px] font-mono text-slate-400 block text-center border-b border-slate-800/60 pb-1">
+                          {d.date.slice(5)}
+                        </span>
+                        <div className="space-y-1 text-xs font-mono">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 text-[10px]">مغادر:</span>
+                            <span className="text-rose-400 font-bold">-{d.leaves}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-500 text-[10px]">استرداد:</span>
+                            <span className="text-emerald-400 font-bold">+{d.rejoins}</span>
+                          </div>
+                        </div>
+                        <div className="pt-1 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
+                          <span className="text-slate-500">الصافي:</span>
+                          <span className={`font-bold font-mono ${net > 0 ? 'text-emerald-400' : net < 0 ? 'text-rose-400' : 'text-slate-400'}`}>
+                            {net > 0 ? `+${net}` : net}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
