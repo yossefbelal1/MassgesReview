@@ -907,15 +907,13 @@ class RetentionEngine:
         ]
 
         chosen_userbot = None
-        if not username and access_hash:
-            # Check if hash owner is ready
+        if not username and access_hash and not ready_userbots:
+            # If no ready userbots exist, check if hash owner is on a cooldown and queue for it
             hash_owner = next(
                 (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
                 None
             )
-            if hash_owner and hash_owner in ready_userbots:
-                chosen_userbot = hash_owner
-            elif not ready_userbots and hash_owner:
+            if hash_owner:
                 ub_cd = self._to_utc(hash_owner.cooldown_until)
                 if ub_cd and ub_cd > now:
                     wait_sec = max(10, int((ub_cd - now).total_seconds()))
@@ -932,10 +930,9 @@ class RetentionEngine:
                     }
 
         if ready_userbots:
-            if not chosen_userbot:
-                ready_userbots.sort(key=lambda ub: ub.id)
-                chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
-                self._rr_index += 1
+            ready_userbots.sort(key=lambda ub: ub.id)
+            chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
+            self._rr_index += 1
 
             logger.info(f"[⚖️ Userbot Dispatch]: Dispatching case {case.id} (user {case.telegram_user_id} @{username or 'no_user'}) via {chosen_userbot.phone} (@{chosen_userbot.username})")
 
