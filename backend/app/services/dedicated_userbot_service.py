@@ -469,17 +469,26 @@ class DedicatedUserbotService:
                 "uncontactable_reason": "USER_BLOCKED_OR_DELETED",
                 "can_retry": False
             }
+        except (ValueError, TypeError) as val_err:
+            logger.info(f"[🛡️ Unresolvable Telegram Entity]: User {target_user_id} cannot be resolved by MTProto: {val_err}")
+            return {
+                "success": False,
+                "error": "CANNOT_RESOLVE_PEER",
+                "error_ar": "لا يملك المستخدم معرفاً عاماً (@username) أو جهة اتصال متبادلة، وتمنع بروتوكولات تيليجرام مراسلته بدون معرف.",
+                "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
+                "can_retry": False
+            }
         except PeerFloodError:
-            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=1)
+            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=15)
             userbot.status = "FLOOD_WAIT"
             userbot.last_error = "PeerFloodError from Telegram"
             db.commit()
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "الحساب مقيد مؤقتاً لدقيقة واحدة من تيليجرام لمراسلة غير جهات الاتصال.",
+                "error_ar": "الحساب مقيد مؤقتاً لدقائق من تيليجرام لمراسلة غير جهات الاتصال.",
                 "can_retry": True,
-                "retry_delay_seconds": 60
+                "retry_delay_seconds": 900
             }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))
@@ -521,7 +530,16 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 120
             }
         except Exception as e:
+            err_msg = str(e).upper()
             logger.error(f"Error sending message from dedicated userbot {channel_id}: {e}", exc_info=True)
+            if any(term in err_msg for term in ["INPUT ENTITY", "COULD NOT FIND", "CANNOT CAST"]):
+                return {
+                    "success": False,
+                    "error": "CANNOT_RESOLVE_PEER",
+                    "error_ar": "لا يمكن الوصول للمستخدم بدون معرف تيليجرام (@username).",
+                    "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
+                    "can_retry": False
+                }
             userbot.last_error = str(e)
             db.commit()
             return {

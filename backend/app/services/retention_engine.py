@@ -871,6 +871,13 @@ class RetentionEngine:
             except (ValueError, TypeError):
                 access_hash = None
 
+        def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+            if dt is None:
+                return None
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
         # Multi-account Load Balancing for the tenant
         tenant_userbots = db.query(ChannelUserbot).filter(
             ChannelUserbot.tenant_id == channel.tenant_id,
@@ -885,7 +892,8 @@ class RetentionEngine:
 
         # Auto-heal any bots whose cooldown expired
         for ub in tenant_userbots:
-            if ub.status == "FLOOD_WAIT" and (not ub.cooldown_until or ub.cooldown_until <= now):
+            ub_cd = self._to_utc(ub.cooldown_until)
+            if ub.status == "FLOOD_WAIT" and (not ub_cd or ub_cd <= now):
                 ub.status = "CONNECTED"
                 ub.cooldown_until = None
                 ub.last_error = None
@@ -893,7 +901,7 @@ class RetentionEngine:
 
         ready_userbots = [
             ub for ub in tenant_userbots
-            if (not ub.cooldown_until or ub.cooldown_until <= now)
+            if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
             and (ub.daily_contacts_count or 0) < 50
         ]
 
@@ -981,7 +989,12 @@ class RetentionEngine:
             case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
             db.commit()
             logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
-            return {"success": False, "error": res.get("error_ar") or res.get("error"), "retry_delay": retry_seconds}
+            return {
+                "success": False,
+                "error_code": res.get("error"),
+                "error": res.get("error_ar") or res.get("error"),
+                "retry_delay": retry_seconds
+            }
 
         return res
 
@@ -1024,8 +1037,9 @@ class RetentionEngine:
                 if res.get("success"):
                     sent_count += 1
                     await asyncio.sleep(pacing_delay)
-                elif res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD"]:
-                    logger.info(f"[⚠️ Outreach Paused for tenant {tenant.id}]: {res.get('error')}")
+                elif res.get("error_code") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"] or \
+                     res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"]:
+                    logger.info(f"[⚠️ Outreach Paused for tenant {tenant.id}]: {res.get('error_code') or res.get('error')}")
                     break
                 else:
                     await asyncio.sleep(1.0)

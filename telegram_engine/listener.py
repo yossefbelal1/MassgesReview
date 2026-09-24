@@ -187,26 +187,20 @@ async def retention_outreach_dispatcher():
                     eb.last_error = None
                 db.commit()
 
-            # Circuit breaker: only back off if fallback pool is in cooldown AND no active dedicated userbots exist
-            has_dedicated_bots = db.query(ChannelUserbot).filter(
-                ChannelUserbot.is_active == True,
-                (
-                    (ChannelUserbot.status == "CONNECTED") |
-                    ((ChannelUserbot.status == "FLOOD_WAIT") & (
-                        (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now_utc)
-                    ))
-                )
+            # Circuit breaker: only back off if fallback pool is in cooldown AND no dedicated userbots exist in DB
+            has_dedicated_bots_configured = db.query(ChannelUserbot).filter(
+                ChannelUserbot.is_active == True
             ).first() is not None
 
             all_fallback_in_cooldown = len(userbot_pool.sessions) > 0 and all(
                 time.time() < s.cooldown_until for s in userbot_pool.sessions
             )
-            if not has_dedicated_bots and all_fallback_in_cooldown:
+            if not has_dedicated_bots_configured and all_fallback_in_cooldown:
                 cooldowns = [s.cooldown_until - time.time() for s in userbot_pool.sessions]
                 wait_remaining = int(max(cooldowns)) if cooldowns else 60
                 if backoff_seconds < 300:  # Max 5 min backoff
                     backoff_seconds = min(backoff_seconds * 2, 300)
-                print(f"[⏸️ Outreach Circuit Breaker]: All fallback sessions in PeerFlood cooldown and no dedicated bots. "
+                print(f"[⏸️ Outreach Circuit Breaker]: All fallback sessions in PeerFlood cooldown and no dedicated bots configured. "
                       f"Next check in {int(backoff_seconds)}s. Cooldown remaining: {wait_remaining}s", flush=True)
                 db.close()
                 await asyncio.sleep(backoff_seconds)
