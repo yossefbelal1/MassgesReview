@@ -55,7 +55,8 @@ def get_retention_summary(
     total_responded = base_query.filter(
         or_(
             RecoveryCase.last_response_at.isnot(None),
-            RecoveryCase.status.in_(["CONVERSATION_ACTIVE", "LINK_DELIVERED", "RECOVERED"])
+            RecoveryCase.status == "CONVERSATION_ACTIVE",
+            RecoveryCase.leave_reason_raw.isnot(None)
         )
     ).count()
 
