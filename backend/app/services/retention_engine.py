@@ -879,19 +879,13 @@ class RetentionEngine:
             except (ValueError, TypeError):
                 access_hash = None
 
-        # Multi-account Load Balancing for the tenant
+        # Multi-Account Failover & Load Balancing for the tenant
         tenant_userbots = db.query(ChannelUserbot).filter(
             ChannelUserbot.tenant_id == channel.tenant_id,
-            ChannelUserbot.is_active == True,
-            (
-                (ChannelUserbot.status == "CONNECTED") |
-                ((ChannelUserbot.status == "FLOOD_WAIT") & (
-                    (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
-                ))
-            )
+            ChannelUserbot.is_active == True
         ).all()
 
-        # Auto-heal any bots whose cooldown expired
+        # Clean expired cooldowns
         for ub in tenant_userbots:
             ub_cd = self._to_utc(ub.cooldown_until)
             if ub.status == "FLOOD_WAIT" and (not ub_cd or ub_cd <= now):
@@ -900,114 +894,100 @@ class RetentionEngine:
                 ub.last_error = None
         db.commit()
 
+        # Partition bots: Ready vs Limited
         ready_userbots = [
             ub for ub in tenant_userbots
             if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
             and (ub.daily_contacts_count or 0) < 50
+            and ub.status == "CONNECTED"
         ]
+        limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
 
-        chosen_userbot = None
-        if not username and access_hash and not ready_userbots:
-            # If no ready userbots exist, check if hash owner is on a cooldown and queue for it
-            hash_owner = next(
-                (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
-                None
-            )
-            if hash_owner:
-                ub_cd = self._to_utc(hash_owner.cooldown_until)
-                if ub_cd and ub_cd > now:
-                    wait_sec = max(10, int((ub_cd - now).total_seconds()))
-                    case.scheduled_contact_at = now + timedelta(seconds=wait_sec)
-                    case.status = "SCHEDULED"
-                    case.contactable = True
-                    case.uncontactable_reason = None
-                    db.commit()
-                    logger.info(f"[⏳ Queued for Hash Owner]: User {case.telegram_user_id} delayed by {wait_sec}s until {hash_owner.username} cooldown ends.")
-                    return {
-                        "success": False,
-                        "error_code": "HASH_OWNER_COOLDOWN",
-                        "error": f"الحساب المخصص للتواصل في فترة راحة مؤقتة، ستتم المراسلة تلقائياً بعد {wait_sec} ثانية."
-                    }
+        res = {"success": False, "error": "NO_AVAILABLE_BOTS"}
 
         if ready_userbots:
+            # Sort for fair distribution
             ready_userbots.sort(key=lambda ub: ub.id)
-            chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
+            start_idx = self._rr_index % len(ready_userbots)
             self._rr_index += 1
+            ordered_userbots = ready_userbots[start_idx:] + ready_userbots[:start_idx]
 
-            logger.info(f"[⚖️ Userbot Dispatch]: Dispatching case {case.id} (user {case.telegram_user_id} @{username or 'no_user'}) via {chosen_userbot.phone} (@{chosen_userbot.username})")
+            # Try candidate accounts in sequence (failover chain)
+            for bot in ordered_userbots:
+                logger.info(f"[⚖️ Userbot Dispatch]: Trying {bot.phone} (@{bot.username}) for case {case.id} (user {case.telegram_user_id} @{username or 'no_user'})")
+                send_res = await dedicated_userbot_service.send_direct_message_for_channel(
+                    db=db,
+                    channel_id=bot.channel_id,
+                    target_user_id=int(case.telegram_user_id),
+                    text=outbound_text,
+                    target_username=username,
+                    access_hash=access_hash,
+                    userbot_id=bot.id
+                )
+                if send_res.get("success"):
+                    res = send_res
+                    break
+                else:
+                    err = send_res.get("error", "")
+                    logger.warning(f"[⚠️ Bot @{bot.username} Failed]: {err}. Checking alternate account...")
+                    res = send_res
 
-            res = await dedicated_userbot_service.send_direct_message_for_channel(
-                db=db,
-                channel_id=chosen_userbot.channel_id,
-                target_user_id=int(case.telegram_user_id),
-                text=outbound_text,
-                target_username=username,
-                access_hash=access_hash,
-                userbot_id=chosen_userbot.id
-            )
-
-            # If sending failed for any reason that can be recovered by an alternate userbot
-            failover_errors = [
-                "CLIENT_DISCONNECTED", "NO_DEDICATED_USERBOT", "PEER_FLOOD",
-                "DAILY_QUOTA_REACHED", "ACCOUNT_COOLDOWN", "CANNOT_RESOLVE_PEER",
-                "PEER_ID_INVALID", "NO_USERNAME_OR_ACCESS_HASH"
-            ]
-            if not res.get("success") and (
-                res.get("error") in failover_errors or
-                res.get("uncontactable_reason") in ["NO_USERNAME_OR_ACCESS_HASH", "RPC_ERROR"]
-            ):
-                alternate_userbots = [ub for ub in ready_userbots if ub.id != chosen_userbot.id]
-                for alt_bot in alternate_userbots:
-                    logger.info(f"[🔄 Multi-Account Failover]: Attempting failover to alternate userbot {alt_bot.phone} (@{alt_bot.username}) for case {case.id}")
-                    res = await dedicated_userbot_service.send_direct_message_for_channel(
-                        db=db,
-                        channel_id=alt_bot.channel_id,
-                        target_user_id=int(case.telegram_user_id),
-                        text=outbound_text,
-                        target_username=username,
-                        access_hash=access_hash,
-                        userbot_id=alt_bot.id
-                    )
-                    if res.get("success"):
+                    # User-level restrictions (cannot be fixed by trying other bots)
+                    if err in ["PRIVACY_RESTRICTED", "USER_BLOCKED_OR_DELETED", "NOT_MUTUAL_CONTACT", "PEER_IS_CHANNEL_OR_GROUP"]:
                         break
+                    # Otherwise (PeerFlood, FloodWait, Cannot Resolve Peer, etc.):
+                    # Continue loop to try next userbot!
+                    continue
 
-                if not res.get("success") and not alternate_userbots:
-                    if res.get("error") == "CANNOT_RESOLVE_PEER" and access_hash:
-                        hash_owner = next(
-                            (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
-                            None
-                        )
-                        if hash_owner and hash_owner.cooldown_until:
-                            cd = self._to_utc(hash_owner.cooldown_until)
-                            if cd and cd > now:
-                                case.scheduled_contact_at = cd
-                                case.status = "SCHEDULED"
-                                case.contactable = True
-                                case.uncontactable_reason = None
-                                db.commit()
-                                logger.info(f"[⏳ Case Queued for Hash Owner]: Case {case.id} delayed until {cd} for {hash_owner.username}")
-                                return {
-                                    "success": False,
-                                    "error_code": "WAITING_FOR_HASH_OWNER",
-                                    "error": f"المستخدم يحتاج الحساب الأساسي ({hash_owner.username})، ستتم المراسلة تلقائياً عند انتهاء فترة الراحة."
-                                }
+        # If not successful and tenant userbots exist, handle gracefully:
+        if not res.get("success"):
+            # Check if this user has no username and needs the primary session hash owner
+            if not username and access_hash:
+                hash_owner = next(
+                    (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
+                    None
+                )
+                if hash_owner and hash_owner.cooldown_until:
+                    cd = self._to_utc(hash_owner.cooldown_until)
+                    if cd and cd > now:
+                        case.scheduled_contact_at = cd
+                        case.status = "SCHEDULED"
+                        case.contactable = True
+                        case.uncontactable_reason = None
+                        db.commit()
+                        wait_min = max(1, int((cd - now).total_seconds()) // 60)
+                        logger.info(f"[⏳ Case Queued for Hash Owner]: Case {case.id} delayed until {cd} for {hash_owner.username}")
+                        return {
+                            "success": False,
+                            "error_code": "WAITING_FOR_HASH_OWNER",
+                            "message": f"هذا العضو ليس لديه معرف (@username)، وحساب الاسترداد الأساسي (@{hash_owner.username}) في فترة راحة مؤقتة من تيليجرام. ستتم المراسلة تلقائياً بعد {wait_min} دقيقة، أو يمكنك مراسلته الآن عبر زر تيليجرام ↗."
+                        }
 
-                    logger.info(f"[🔄 Dedicated Userbot Fallback]: Falling back to shared pool for channel {channel.title}")
-                    res = await userbot_pool.send_direct_message(
-                        target_user_id=int(case.telegram_user_id),
-                        text=outbound_text,
-                        channel_id=channel.id,
-                        target_username=username,
-                        access_hash=access_hash
-                    )
-        else:
-            res = await userbot_pool.send_direct_message(
-                target_user_id=int(case.telegram_user_id),
-                text=outbound_text,
-                channel_id=channel.id,
-                target_username=username,
-                access_hash=access_hash
-            )
+            # If all accounts are limited:
+            if not ready_userbots and limited_userbots:
+                cooldowns = [self._to_utc(ub.cooldown_until) for ub in limited_userbots if ub.cooldown_until]
+                min_cd = min(cooldowns) if cooldowns else (now + timedelta(minutes=15))
+                wait_min = max(1, int((min_cd - now).total_seconds()) // 60)
+                case.scheduled_contact_at = min_cd
+                case.status = "SCHEDULED"
+                case.contactable = True
+                case.uncontactable_reason = None
+                db.commit()
+                return {
+                    "success": False,
+                    "error_code": "ALL_BOTS_LIMITED",
+                    "message": f"جميع حسابات المراسلة في فترة راحة مؤقتة من تيليجرام. ستتم المراسلة تلقائياً بعد {wait_min} دقيقة، أو يمكنك الضغط على زر تيليجرام ↗ للمراسلة مباشرة."
+                }
+
+            # If no dedicated userbots exist at all:
+            if not tenant_userbots:
+                res = await userbot_pool.send_direct_message(
+                    target_user_id=int(case.telegram_user_id),
+                    text=outbound_text,
+                    channel_id=channel.id,
+                    target_username=username,
+                    access_hash=access_hash
+                )
 
         now = datetime.now(timezone.utc)
         if res["success"]:
@@ -1028,7 +1008,7 @@ class RetentionEngine:
             db.add(msg)
             db.commit()
             logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
-            return {"success": True, "userbot": res["userbot_username"], "message": "تم إرسال رسالة الاسترداد بنجاح! ⚡"}
+            return {"success": True, "userbot": res["userbot_username"], "message": f"تم إرسال رسالة الاسترداد بنجاح عبر @{res['userbot_username']}! ⚡"}
 
         elif res.get("uncontactable_reason") in ["PRIVACY_RESTRICTED", "NOT_MUTUAL_CONTACT", "USER_BLOCKED_OR_DELETED", "INVOLUNTARY_BAN", "INVOLUNTARY_KICK"]:
             # Genuine Telegram user privacy restriction, Premium required, or deleted account
@@ -1075,16 +1055,11 @@ class RetentionEngine:
             for fb in flood_bots:
                 fb_cd = self._to_utc(fb.cooldown_until)
                 if not fb_cd or fb_cd <= now:
-                    try:
-                        asyncio.create_task(
-                            dedicated_userbot_service.auto_heal_userbot_via_spambot(
-                                db=db,
-                                channel_id=fb.channel_id,
-                                userbot_id=fb.id
-                            )
-                        )
-                    except Exception as he_err:
-                        logger.error(f"[Worker Auto-Heal trigger error]: {he_err}")
+                    fb.status = "CONNECTED"
+                    fb.cooldown_until = None
+                    fb.last_error = None
+                    db.commit()
+                    logger.info(f"[Worker Auto-Restore]: Cooldown expired for {fb.username}. Status restored to CONNECTED.")
 
             # Check count of active dedicated userbots for this tenant
             active_bots = db.query(ChannelUserbot).filter(

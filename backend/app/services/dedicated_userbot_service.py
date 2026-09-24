@@ -41,6 +41,7 @@ class DedicatedUserbotService:
     def __init__(self):
         self._clients: Dict[str, TelegramClient] = {}
         self._last_message_times: Dict[str, float] = {}
+        self._last_spambot_checks: Dict[str, float] = {}
 
     async def send_login_code(
         self,
@@ -414,7 +415,21 @@ class DedicatedUserbotService:
             # Resolve target entity intelligently across userbot sessions
             entity = None
             if target_username:
-                entity = target_username
+                clean_un = target_username.strip().lstrip('@')
+                try:
+                    ent = await client.get_input_entity(clean_un)
+                    from telethon.tl.types import InputPeerChannel, InputPeerChat
+                    if isinstance(ent, (InputPeerChannel, InputPeerChat)):
+                        return {
+                            "success": False,
+                            "error": "PEER_IS_CHANNEL_OR_GROUP",
+                            "error_ar": "المعرف المسجل يخص قناة أو مجموعة وليس حساب مستخدم، لا يمكن مراسلته.",
+                            "uncontactable_reason": "INVALID_PEER_TYPE",
+                            "can_retry": False
+                        }
+                    entity = ent
+                except Exception:
+                    entity = clean_un
             else:
                 # 1. Try local session cache first
                 try:
@@ -429,8 +444,14 @@ class DedicatedUserbotService:
                         try:
                             from telethon.tl.functions.channels import GetAdminLogRequest
                             from telethon.tl.types import ChannelAdminLogEventsFilter
-                            chan_ent = await client.get_entity(int(channel.telegram_chat_id))
-                            await client(GetAdminLogRequest(
+                            chat_id = int(channel.telegram_chat_id)
+                            try:
+                                chan_ent = await client.get_entity(chat_id)
+                            except Exception:
+                                await client.get_dialogs(limit=25)
+                                chan_ent = await client.get_entity(chat_id)
+
+                            admin_res = await client(GetAdminLogRequest(
                                 channel=chan_ent,
                                 q='',
                                 max_id=0,
@@ -438,8 +459,10 @@ class DedicatedUserbotService:
                                 limit=100,
                                 events_filter=ChannelAdminLogEventsFilter(leave=True)
                             ))
-                            entity = await client.get_input_entity(int(target_user_id))
-                            logger.info(f"[Warm Cache]: Successfully resolved user {target_user_id} via channel {channel.title} admin log!")
+                            match_user = next((u for u in admin_res.users if u.id == int(target_user_id)), None)
+                            if match_user:
+                                entity = match_user
+                                logger.info(f"[Warm Cache]: Found user {target_user_id} in channel admin log for {bot_key}!")
                         except Exception as warm_err:
                             logger.debug(f"[Userbot entity warm failed for user {target_user_id}]: {warm_err}")
 
@@ -510,18 +533,28 @@ class DedicatedUserbotService:
             return {
                 "success": False,
                 "error": "CANNOT_RESOLVE_PEER",
-                "error_ar": "تعذر مطابقة المستخدم عبر هذا الحساب حالياً، ستتم إعادة المحاولة آلياً.",
+                "error_ar": "تعذر مطابقة المستخدم عبر هذا الحساب، ستتم التجربة عبر الحساب الآخر آلياً.",
                 "can_retry": True,
                 "retry_delay_seconds": 60
             }
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Triggering immediate SpamBot auto-healer...")
-            unlocked, status_msg, cd_time = await self.auto_heal_userbot_via_spambot(
-                db=db,
-                channel_id=channel_id,
-                userbot_id=userbot.id,
-                client=client
-            )
+            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Setting FLOOD_WAIT and checking auto-healer...")
+            userbot.status = "FLOOD_WAIT"
+            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=900)
+            userbot.last_error = "PeerFloodError from Telegram"
+            db.commit()
+
+            unlocked = False
+            # Check SpamBot only if at least 15 minutes since last check to prevent spamming
+            now_t = time.time()
+            if now_t - self._last_spambot_checks.get(userbot.id, 0) > 900:
+                unlocked, status_msg, cd_time = await self.auto_heal_userbot_via_spambot(
+                    db=db,
+                    channel_id=channel_id,
+                    userbot_id=userbot.id,
+                    client=client
+                )
+
             if unlocked:
                 return {
                     "success": False,
@@ -531,21 +564,12 @@ class DedicatedUserbotService:
                     "retry_delay_seconds": 5
                 }
             else:
-                wait_sec = 900
-                if userbot.cooldown_until:
-                    now_u = datetime.now(timezone.utc)
-                    cd = userbot.cooldown_until
-                    if cd.tzinfo is None:
-                        cd = cd.replace(tzinfo=timezone.utc)
-                    if cd > now_u:
-                        wait_sec = int((cd - now_u).total_seconds())
-
                 return {
                     "success": False,
                     "error": "PEER_FLOOD",
-                    "error_ar": f"الحساب مقيد مؤقتاً من تيليجرام حتى {userbot.cooldown_until.strftime('%H:%M UTC') if userbot.cooldown_until else 'دقائق'}.",
+                    "error_ar": f"الحساب مقيد مؤقتاً من تيليجرام (PeerFlood)، ستتم التجربة عبر الحساب البديل.",
                     "can_retry": True,
-                    "retry_delay_seconds": wait_sec
+                    "retry_delay_seconds": 900
                 }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))
@@ -563,7 +587,15 @@ class DedicatedUserbotService:
         except RPCError as rpc_err:
             err_msg = str(rpc_err).upper()
             logger.warning(f"[⚠️ RPC Error in dedicated userbot {channel_id} for user {target_user_id}]: {rpc_err}")
-            if any(term in err_msg for term in ["PRIVACY_PREMIUM_REQUIRED", "PRIVACY_RESTRICTED", "USER_PRIVACY", "CHAT_WRITE_FORBIDDEN", "PEER_ID_INVALID", "USER_BANNED"]):
+            if any(term in err_msg for term in ["INVALID PEER", "PEER_ID_INVALID", "CANNOT CAST"]):
+                return {
+                    "success": False,
+                    "error": "CANNOT_RESOLVE_PEER",
+                    "error_ar": "تعذر مطابقة المستخدم عبر هذا الحساب، ستتم التجربة عبر الحساب البديل آلياً.",
+                    "can_retry": True,
+                    "retry_delay_seconds": 60
+                }
+            if any(term in err_msg for term in ["PRIVACY_PREMIUM_REQUIRED", "PRIVACY_RESTRICTED", "USER_PRIVACY", "CHAT_WRITE_FORBIDDEN", "USER_BANNED"]):
                 return {
                     "success": False,
                     "error": "PRIVACY_RESTRICTED",
@@ -581,13 +613,13 @@ class DedicatedUserbotService:
         except Exception as e:
             err_msg = str(e).upper()
             logger.error(f"Error sending message from dedicated userbot {channel_id}: {e}", exc_info=True)
-            if any(term in err_msg for term in ["INPUT ENTITY", "COULD NOT FIND", "CANNOT CAST"]):
+            if any(term in err_msg for term in ["INPUT ENTITY", "COULD NOT FIND", "CANNOT CAST", "INVALID PEER"]):
                 return {
                     "success": False,
                     "error": "CANNOT_RESOLVE_PEER",
-                    "error_ar": "لا يمكن الوصول للمستخدم بدون معرف تيليجرام (@username).",
+                    "error_ar": "تعذر مطابقة المستخدم عبر هذا الحساب، ستتم التجربة عبر الحساب البديل.",
                     "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
-                    "can_retry": False
+                    "can_retry": True
                 }
             userbot.last_error = str(e)
             db.commit()
@@ -604,16 +636,12 @@ class DedicatedUserbotService:
         db: Session,
         channel_id: str,
         userbot_id: Optional[str] = None,
-        client: Optional[TelegramClient] = None
+        client: Optional[TelegramClient] = None,
+        force: bool = False
     ) -> Tuple[bool, str, Optional[datetime]]:
         """
         Automated Telegram @SpamBot appeal and cooldown cleanser.
-        Interacts with @SpamBot:
-        1. Sends /start
-        2. Detects if free ("free as a bird" or "no limits") -> unlocks immediately.
-        3. If limited, clicks 'Why was I reported?' -> 'I understand, thanks' -> '/start'
-           to acknowledge the warning and dismiss expired or dismissible limits.
-        4. Extracts exact release timestamp from Telegram and updates database cooldown.
+        Debounced to maximum once per 15 minutes per userbot unless force=True.
         """
         if not client:
             client = await self.get_client_for_channel(db, channel_id, userbot_id=userbot_id)
@@ -627,6 +655,14 @@ class DedicatedUserbotService:
             userbot = db.query(ChannelUserbot).filter(ChannelUserbot.channel_id == channel_id).first()
 
         bot_label = (userbot.username if userbot else None) or (userbot.phone if userbot else "userbot")
+        bot_check_key = userbot.id if userbot else (userbot_id or channel_id)
+
+        now_ts = time.time()
+        last_chk = self._last_spambot_checks.get(bot_check_key, 0)
+        if not force and (now_ts - last_chk < 900):
+            logger.info(f"[🤖 SpamBot Auto-Healer]: Debounced check for {bot_label} (checked {int(now_ts - last_chk)}s ago).")
+            return False, "CHECK_DEBOUNCED", userbot.cooldown_until if userbot else None
+        self._last_spambot_checks[bot_check_key] = now_ts
 
         try:
             logger.info(f"[🤖 SpamBot Auto-Healer]: Running automated SpamBot check for {bot_label}...")

@@ -785,6 +785,7 @@ async def get_userbots_status(
     result = []
     for ub in userbots:
         ch = db.query(Channel).filter(Channel.id == ub.channel_id).first()
+        ub_cd = ub.cooldown_until.replace(tzinfo=timezone.utc) if (ub.cooldown_until and ub.cooldown_until.tzinfo is None) else ub.cooldown_until
         result.append({
             "id": ub.id,
             "name": ub.channel_id,
@@ -798,7 +799,7 @@ async def get_userbots_status(
             "status": ub.status,
             "daily_contacts_sent": ub.daily_contacts_count or 0,
             "max_daily_contacts": 35,
-            "in_cooldown": bool(ub.cooldown_until and ub.cooldown_until > now),
+            "in_cooldown": bool(ub_cd and ub_cd > now),
             "created_at": ub.created_at.isoformat() if ub.created_at else None
         })
     return result
