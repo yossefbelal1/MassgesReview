@@ -906,19 +906,32 @@ class RetentionEngine:
             and (ub.daily_contacts_count or 0) < 50
         ]
 
-        if ready_userbots:
-            # Smart Routing:
-            # 1. If user has NO username but has access_hash, prioritize the userbot that discovered the entity (AutoMassge1 / primary).
-            # 2. If user HAS a username, round-robin 50/50 evenly across accounts.
-            chosen_userbot = None
-            if not username and access_hash:
-                hash_owner = next(
-                    (ub for ub in ready_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
-                    None
-                )
-                if hash_owner:
+        chosen_userbot = None
+        if not username and access_hash:
+            # Must be sent by the bot that holds the MTProto access hash
+            hash_owner = next(
+                (ub for ub in tenant_userbots if "AutoMassge1" in (ub.username or "") or "+48455536804" in (ub.phone or "")),
+                None
+            )
+            if hash_owner:
+                ub_cd = self._to_utc(hash_owner.cooldown_until)
+                if ub_cd and ub_cd > now:
+                    wait_sec = max(10, int((ub_cd - now).total_seconds()))
+                    case.scheduled_contact_at = now + timedelta(seconds=wait_sec)
+                    case.status = "SCHEDULED"
+                    case.contactable = True
+                    case.uncontactable_reason = None
+                    db.commit()
+                    logger.info(f"[⏳ Queued for Hash Owner]: User {case.telegram_user_id} delayed by {wait_sec}s until {hash_owner.username} cooldown ends.")
+                    return {
+                        "success": False,
+                        "error_code": "HASH_OWNER_COOLDOWN",
+                        "error": f"الحساب المخصص للتواصل في فترة راحة مؤقتة، ستتم المراسلة تلقائياً بعد {wait_sec} ثانية."
+                    }
+                elif hash_owner in ready_userbots:
                     chosen_userbot = hash_owner
 
+        if ready_userbots:
             if not chosen_userbot:
                 ready_userbots.sort(key=lambda ub: ub.id)
                 chosen_userbot = ready_userbots[self._rr_index % len(ready_userbots)]
@@ -1000,8 +1013,8 @@ class RetentionEngine:
             logger.info(f"[📬 Recovery Message Sent]: To user {case.telegram_user_id} (@{username or 'no_user'}) via {res['userbot_username']}")
             return {"success": True, "userbot": res["userbot_username"], "message": "تم إرسال رسالة الاسترداد بنجاح! ⚡"}
 
-        elif res.get("uncontactable_reason") or not res.get("can_retry", True):
-            # Permanent Telegram user privacy restriction, Premium required, or deleted account
+        elif res.get("uncontactable_reason") in ["PRIVACY_RESTRICTED", "NOT_MUTUAL_CONTACT", "USER_BLOCKED_OR_DELETED", "INVOLUNTARY_BAN", "INVOLUNTARY_KICK"]:
+            # Genuine Telegram user privacy restriction, Premium required, or deleted account
             case.status = "UNCONTACTABLE"
             case.contactable = False
             case.uncontactable_reason = res.get("uncontactable_reason") or "PRIVACY_RESTRICTED"
@@ -1009,9 +1022,12 @@ class RetentionEngine:
             logger.info(f"[🛡️ Genuine Uncontactable]: User {case.telegram_user_id} ({case.uncontactable_reason})")
             return {"success": False, "error": res.get("error_ar") or res.get("error")}
 
-        elif res.get("can_retry", True):
-            # Temporary backoff delay (capped so alternate bots can retry without long delays)
+        else:
+            # Temporary backoff delay (cooldowns, temporary peer delays, network): keep in SCHEDULED
             retry_seconds = min(res.get("retry_delay_seconds", 30), 120)
+            case.status = "SCHEDULED"
+            case.contactable = True
+            case.uncontactable_reason = None
             case.scheduled_contact_at = now + timedelta(seconds=retry_seconds)
             db.commit()
             logger.info(f"[⏳ Case Delayed]: Case {case.id} delayed by {retry_seconds}s (reason: {res.get('error')})")
