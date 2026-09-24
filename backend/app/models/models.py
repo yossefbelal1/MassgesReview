@@ -31,6 +31,7 @@ class Tenant(Base):
     channel_userbots = relationship("ChannelUserbot", back_populates="tenant", cascade="all, delete-orphan")
     invite_links = relationship("InviteLink", back_populates="tenant", cascade="all, delete-orphan")
     membership_events = relationship("MembershipEvent", back_populates="tenant", cascade="all, delete-orphan")
+    membership_states = relationship("MembershipState", back_populates="tenant", cascade="all, delete-orphan")
     rejoin_attempts = relationship("RejoinAttempt", back_populates="tenant", cascade="all, delete-orphan")
     retention_metrics = relationship("RetentionMetric", back_populates="tenant", cascade="all, delete-orphan")
 
@@ -99,6 +100,11 @@ class Channel(Base):
     last_seen_admin_log_id = Column(String, default="0")
     last_admin_log_sync_at = Column(DateTime, nullable=True)
     sync_status = Column(String, default="ACTIVE")  # ACTIVE, POLLING, RESTRICTED
+    health_state = Column(String, default="HEALTHY")  # HEALTHY, DEGRADED, RECONNECTING, STOPPED
+    consecutive_errors = Column(Integer, default=0)
+    last_event_at = Column(DateTime, nullable=True)
+    last_error_at = Column(DateTime, nullable=True)
+    last_success_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
@@ -115,6 +121,7 @@ class Channel(Base):
     login_attempts = relationship("UserbotLoginAttempt", back_populates="channel", cascade="all, delete-orphan")
     invite_links = relationship("InviteLink", back_populates="channel", cascade="all, delete-orphan")
     membership_events = relationship("MembershipEvent", back_populates="channel", cascade="all, delete-orphan")
+    membership_states = relationship("MembershipState", back_populates="channel", cascade="all, delete-orphan")
     rejoin_attempts = relationship("RejoinAttempt", back_populates="channel", cascade="all, delete-orphan")
     retention_metrics = relationship("RetentionMetric", back_populates="channel", cascade="all, delete-orphan")
 
@@ -445,20 +452,44 @@ class MembershipEvent(Base):
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
     telegram_user_id = Column(String(64), index=True, nullable=False)
-    event_type = Column(String(32), nullable=False)  # JOIN, LEAVE, JOIN_REQUEST
+    event_type = Column(String(32), nullable=False)  # JOIN, LEAVE, KICK, BAN, JOIN_REQUEST
     invite_id = Column(String, ForeignKey("invite_links.id", ondelete="SET NULL"), nullable=True)
-    source = Column(String(32), default="ADMIN_LOG")  # ADMIN_LOG, CHAT_MEMBER_UPDATED, RECONCILIATION
+    via_join_request = Column(Boolean, default=False)
+    source = Column(String(32), default="ADMIN_LOG")  # ADMIN_LOG, CHAT_MEMBER_UPDATED, RECONCILIATION, INVITE_LINK, DIRECT, JOIN_REQUEST
     extra_metadata = Column(JSON, default=dict)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
     __table_args__ = (
         Index("idx_event_tenant_channel_time", "tenant_id", "channel_id", "timestamp"),
         Index("idx_event_tg_user", "telegram_user_id", "event_type"),
+        UniqueConstraint("channel_id", "telegram_user_id", "timestamp", "event_type", name="uq_member_event_idempotent"),
     )
 
     tenant = relationship("Tenant", back_populates="membership_events")
     channel = relationship("Channel", back_populates="membership_events")
     invite = relationship("InviteLink", back_populates="events")
+
+
+class MembershipState(Base):
+    __tablename__ = "membership_state"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    channel_id = Column(String, ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    telegram_user_id = Column(String(64), index=True, nullable=False)
+    status = Column(String(32), default="member")  # member, left, kicked, banned
+    first_join = Column(DateTime, nullable=True)
+    last_join = Column(DateTime, nullable=True)
+    last_leave = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("channel_id", "telegram_user_id", name="uq_channel_tg_state"),
+        Index("idx_state_tenant_channel_status", "tenant_id", "channel_id", "status"),
+    )
+
+    tenant = relationship("Tenant", back_populates="membership_states")
+    channel = relationship("Channel", back_populates="membership_states")
 
 
 class RejoinAttempt(Base):

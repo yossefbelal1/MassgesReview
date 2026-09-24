@@ -199,14 +199,14 @@ def test_daily_metrics_computation(client: TestClient, db: Session, tenant_a: di
             channel_id=channel.id,
             telegram_user_id=f"user_{i}",
             event_type="LEAVE",
-            timestamp=now - timedelta(minutes=i * 10)
+            timestamp=now - timedelta(seconds=i * 5)
         ))
     for j in range(2):
         db.add(RejoinAttempt(
             tenant_id=channel.tenant_id,
             channel_id=channel.id,
             telegram_user_id=f"user_{j}",
-            leave_time=now - timedelta(hours=1),
+            leave_time=now - timedelta(seconds=120),
             rejoin_time=now,
             time_to_rejoin_seconds=3600,
             confidence="ATTRIBUTED"

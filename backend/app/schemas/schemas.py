@@ -402,7 +402,8 @@ class MembershipEventOut(BaseModel):
     channel_id: str
     telegram_user_id: str
     event_type: str
-    invite_id: Optional[str]
+    invite_id: Optional[str] = None
+    via_join_request: bool = False
     source: str
     extra_metadata: Optional[dict] = {}
     timestamp: datetime
@@ -442,6 +443,39 @@ class ReconciliationResultOut(BaseModel):
     discrepancy: int
     status: str
     reconciled_at: datetime
+
+class MembershipStateOut(BaseModel):
+    id: str
+    tenant_id: str
+    channel_id: str
+    telegram_user_id: str
+    status: str
+    first_join: Optional[datetime] = None
+    last_join: Optional[datetime] = None
+    last_leave: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+class ChannelHealthOut(BaseModel):
+    channel_id: str
+    title: str
+    health_state: str  # HEALTHY, DEGRADED, RECONNECTING, STOPPED
+    consecutive_errors: int
+    last_event_at: Optional[datetime] = None
+    last_error_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    lag_seconds: Optional[int] = None
+
+class CohortWinbackOut(BaseModel):
+    channel_id: str
+    cohort_start: datetime
+    cohort_end: datetime
+    window: str
+    total_leavers: int
+    total_returned: int
+    winback_rate_percent: float
+
 
 
 

@@ -15,14 +15,23 @@ from telethon.tl.types import (
     ChannelAdminLogEventActionParticipantJoinByRequest,
     ChannelAdminLogEvent
 )
+try:
+    from telethon.tl.types import (
+        ChannelAdminLogEventActionParticipantBan,
+        ChannelAdminLogEventActionParticipantToggleBan
+    )
+except ImportError:
+    ChannelAdminLogEventActionParticipantBan = tuple()
+    ChannelAdminLogEventActionParticipantToggleBan = tuple()
 
 from backend.app.core.database import SessionLocal
 from backend.app.models.models import (
     Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, Tenant, ChannelUserbot,
-    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric
+    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric, MembershipState
 )
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
+from backend.app.services.sse_service import sse_broadcaster
 
 logger = logging.getLogger("reviewflow.retention_engine")
 
@@ -266,6 +275,26 @@ class RetentionEngine:
                         access_hash=access_hash
                     )
 
+                # ── Handle KICK / BAN ────────────────────────────────────────
+                elif (
+                    (ChannelAdminLogEventActionParticipantBan and isinstance(ev.action, ChannelAdminLogEventActionParticipantBan)) or
+                    (ChannelAdminLogEventActionParticipantToggleBan and isinstance(ev.action, ChannelAdminLogEventActionParticipantToggleBan)) or
+                    getattr(ev, 'banned', False) or getattr(ev, 'kicked', False)
+                ):
+                    action_type = "BAN" if (getattr(ev, 'banned', False) or "ban" in ev.action.__class__.__name__.lower()) else "KICK"
+                    events_processed += 1
+                    await self._handle_member_kick_or_ban(
+                        db=db,
+                        channel=channel,
+                        telegram_user_id=user_id,
+                        event_date=event_date,
+                        action_type=action_type,
+                        first_name=first_name,
+                        last_name=last_name,
+                        username=username,
+                        access_hash=access_hash
+                    )
+
                 # ── Handle JOIN / REJOIN ─────────────────────────────────────
                 elif isinstance(ev.action, (
                     ChannelAdminLogEventActionParticipantJoin,
@@ -275,6 +304,12 @@ class RetentionEngine:
                     invite_link_str = None
                     if hasattr(ev.action, 'invite') and ev.action.invite:
                         invite_link_str = getattr(ev.action.invite, 'link', None) or getattr(ev.action.invite, 'slug', None)
+
+                    via_join_request = (
+                        isinstance(ev.action, ChannelAdminLogEventActionParticipantJoinByRequest) or
+                        getattr(ev.action, 'via_join_request', False) or
+                        getattr(ev, 'via_join_request', False)
+                    )
 
                     events_processed += 1
                     await self._handle_member_join(
@@ -287,7 +322,8 @@ class RetentionEngine:
                         last_name=last_name,
                         username=username,
                         access_hash=access_hash,
-                        invite_link_str=invite_link_str
+                        invite_link_str=invite_link_str,
+                        via_join_request=via_join_request
                     )
 
             channel.last_admin_log_sync_at = datetime.now(timezone.utc)
@@ -320,7 +356,7 @@ class RetentionEngine:
         access_hash: Optional[str] = None
     ):
         """Processes a detected member leave event with idempotency."""
-        # Find or create AudienceMember
+        # 1. Find or create AudienceMember
         member = db.query(AudienceMember).filter(
             AudienceMember.channel_id == channel.id,
             AudienceMember.telegram_user_id == telegram_user_id
@@ -350,67 +386,218 @@ class RetentionEngine:
             if username: member.username = username
             db.flush()
 
-        # Check if a case already exists for this exact leave event
+        # 2. Update or create MembershipState projection
+        state = db.query(MembershipState).filter(
+            MembershipState.channel_id == channel.id,
+            MembershipState.telegram_user_id == telegram_user_id
+        ).first()
+        if not state:
+            state = MembershipState(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                status="left",
+                first_join=event_date,
+                last_leave=event_date
+            )
+            db.add(state)
+        else:
+            state.status = "left"
+            state.last_leave = event_date
+
+        # 3. Idempotent raw event log
+        existing_event = db.query(MembershipEvent).filter(
+            MembershipEvent.channel_id == channel.id,
+            MembershipEvent.telegram_user_id == telegram_user_id,
+            MembershipEvent.timestamp == event_date,
+            MembershipEvent.event_type == "LEAVE"
+        ).first()
+        if not existing_event:
+            raw_event = MembershipEvent(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                event_type="LEAVE",
+                source="ADMIN_LOG",
+                extra_metadata={
+                    "leave_event_id": leave_event_id,
+                    "first_name": first_name,
+                    "username": username
+                },
+                timestamp=event_date
+            )
+            db.add(raw_event)
+
+        # 4. Check if a case already exists for this exact leave event
         existing_case = db.query(RecoveryCase).filter(
             RecoveryCase.channel_id == channel.id,
             RecoveryCase.leave_event_id == leave_event_id
         ).first()
 
-        if existing_case:
-            return
+        if not existing_case:
+            # Check if member already has an open or active recovery case for this channel
+            open_case = db.query(RecoveryCase).filter(
+                RecoveryCase.channel_id == channel.id,
+                RecoveryCase.telegram_user_id == telegram_user_id,
+                RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"])
+            ).first()
 
-        # Check if member already has an open or active recovery case for this channel
-        open_case = db.query(RecoveryCase).filter(
-            RecoveryCase.channel_id == channel.id,
-            RecoveryCase.telegram_user_id == telegram_user_id,
-            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"])
-        ).first()
+            if not open_case and member.status != "OPT_OUT":
+                # Schedule recovery contact immediately
+                now = datetime.now(timezone.utc)
+                initial_status = "SCHEDULED"
+                scheduled_at = now
 
-        if open_case:
-            logger.info(f"Skipping duplicate case: User {telegram_user_id} already has active case {open_case.id} [{open_case.status}]")
-            return
+                case = RecoveryCase(
+                    tenant_id=channel.tenant_id,
+                    channel_id=channel.id,
+                    member_id=member.id,
+                    telegram_user_id=telegram_user_id,
+                    leave_event_id=leave_event_id,
+                    status=initial_status,
+                    contactable=True,
+                    scheduled_contact_at=scheduled_at,
+                    created_at=event_date
+                )
+                db.add(case)
+                logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
 
-        # Check if member permanently opted out
-        if member.status == "OPT_OUT":
-            logger.info(f"Skipping leave recovery for user {telegram_user_id}: Member opted out.")
-            return
-
-        # Schedule recovery contact immediately (zero delay as commanded by user)
-        now = datetime.now(timezone.utc)
-        initial_status = "SCHEDULED"
-        scheduled_at = now
-
-        case = RecoveryCase(
-            tenant_id=channel.tenant_id,
-            channel_id=channel.id,
-            member_id=member.id,
-            telegram_user_id=telegram_user_id,
-            leave_event_id=leave_event_id,
-            status=initial_status,
-            contactable=True,
-            scheduled_contact_at=scheduled_at,
-            created_at=event_date
-        )
-        db.add(case)
-
-        # Record raw immutable membership event
-        raw_event = MembershipEvent(
-            tenant_id=channel.tenant_id,
-            channel_id=channel.id,
-            telegram_user_id=telegram_user_id,
-            event_type="LEAVE",
-            source="ADMIN_LOG",
-            extra_metadata={
-                "leave_event_id": leave_event_id,
-                "first_name": first_name,
-                "username": username
-            },
-            timestamp=event_date
-        )
-        db.add(raw_event)
+        channel.last_event_at = event_date
+        channel.last_success_at = datetime.now(timezone.utc)
+        channel.consecutive_errors = 0
+        channel.health_state = "HEALTHY"
 
         db.commit()
-        logger.info(f"[🎯 Retention Case Created]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'}) [{initial_status}]")
+
+        # 5. Broadcast to SSE subscribers
+        sse_broadcaster.broadcast(
+            channel_id=channel.id,
+            event_type="leave",
+            data={
+                "telegram_user_id": telegram_user_id,
+                "username": username,
+                "first_name": first_name,
+                "timestamp": event_date.isoformat(),
+                "event_type": "LEAVE",
+                "source": "ADMIN_LOG"
+            }
+        )
+
+    async def _handle_member_kick_or_ban(
+        self,
+        db: Session,
+        channel: Channel,
+        telegram_user_id: str,
+        event_date: datetime,
+        action_type: str = "KICK",
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        username: Optional[str] = None,
+        access_hash: Optional[str] = None
+    ):
+        """Processes an involuntary kick or ban. Does NOT create a recovery outreach case."""
+        action_status = "banned" if action_type.upper() == "BAN" else "kicked"
+
+        # 1. Update/create AudienceMember
+        member = db.query(AudienceMember).filter(
+            AudienceMember.channel_id == channel.id,
+            AudienceMember.telegram_user_id == telegram_user_id
+        ).first()
+        if not member:
+            member = AudienceMember(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                access_hash=access_hash,
+                first_name=first_name,
+                last_name=last_name,
+                username=username,
+                status=action_status.upper(),
+                first_joined_at=event_date,
+                last_left_at=event_date
+            )
+            db.add(member)
+        else:
+            member.status = action_status.upper()
+            member.last_left_at = event_date
+            if access_hash: member.access_hash = access_hash
+            if first_name: member.first_name = first_name
+            if last_name: member.last_name = last_name
+            if username: member.username = username
+
+        # 2. Update/create MembershipState
+        state = db.query(MembershipState).filter(
+            MembershipState.channel_id == channel.id,
+            MembershipState.telegram_user_id == telegram_user_id
+        ).first()
+        if not state:
+            state = MembershipState(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                status=action_status,
+                first_join=event_date,
+                last_leave=event_date
+            )
+            db.add(state)
+        else:
+            state.status = action_status
+            state.last_leave = event_date
+
+        # 3. Cancel any open recovery case for this member
+        open_cases = db.query(RecoveryCase).filter(
+            RecoveryCase.channel_id == channel.id,
+            RecoveryCase.telegram_user_id == telegram_user_id,
+            RecoveryCase.status.in_(["SCHEDULED", "DETECTED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"])
+        ).all()
+        for oc in open_cases:
+            oc.status = "OPT_OUT"
+            oc.uncontactable_reason = f"INVOLUNTARY_{action_type}"
+
+        # 4. Idempotent raw event log
+        existing_event = db.query(MembershipEvent).filter(
+            MembershipEvent.channel_id == channel.id,
+            MembershipEvent.telegram_user_id == telegram_user_id,
+            MembershipEvent.timestamp == event_date,
+            MembershipEvent.event_type == action_type.upper()
+        ).first()
+        if not existing_event:
+            raw_event = MembershipEvent(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                event_type=action_type.upper(),
+                source="ADMIN_LOG",
+                extra_metadata={
+                    "first_name": first_name,
+                    "username": username,
+                    "action_type": action_type
+                },
+                timestamp=event_date
+            )
+            db.add(raw_event)
+
+        channel.last_event_at = event_date
+        channel.last_success_at = datetime.now(timezone.utc)
+        channel.consecutive_errors = 0
+        channel.health_state = "HEALTHY"
+
+        db.commit()
+
+        # 5. Broadcast to SSE subscribers
+        sse_broadcaster.broadcast(
+            channel_id=channel.id,
+            event_type=action_type.lower(),
+            data={
+                "telegram_user_id": telegram_user_id,
+                "username": username,
+                "first_name": first_name,
+                "timestamp": event_date.isoformat(),
+                "event_type": action_type.upper(),
+                "source": "ADMIN_LOG"
+            }
+        )
+        logger.info(f"[🚫 Involuntary {action_type} Logged]: Channel '{channel.title}' | User {telegram_user_id} (@{username or 'no_user'})")
 
     async def _handle_member_join(
         self,
@@ -423,7 +610,8 @@ class RetentionEngine:
         last_name: Optional[str],
         username: Optional[str],
         access_hash: Optional[str] = None,
-        invite_link_str: Optional[str] = None
+        invite_link_str: Optional[str] = None,
+        via_join_request: bool = False
     ):
         """Processes a detected join/rejoin event, attributes win-back, and logs membership events."""
         member = db.query(AudienceMember).filter(
@@ -431,7 +619,7 @@ class RetentionEngine:
             AudienceMember.telegram_user_id == telegram_user_id
         ).first()
 
-        # Resolve tracked invite link if provided
+        # 1. Resolve tracked invite link if provided
         invite_record = None
         if invite_link_str:
             clean_link = invite_link_str.strip()
@@ -444,22 +632,73 @@ class RetentionEngine:
 
         invite_id = invite_record.id if invite_record else None
 
-        # Record raw immutable membership event
-        raw_event = MembershipEvent(
-            tenant_id=channel.tenant_id,
-            channel_id=channel.id,
-            telegram_user_id=telegram_user_id,
-            event_type="JOIN",
-            invite_id=invite_id,
-            source="ADMIN_LOG",
-            extra_metadata={
-                "first_name": first_name,
-                "username": username,
-                "invite_link": invite_link_str
-            },
-            timestamp=event_date
-        )
-        db.add(raw_event)
+        # 2. Check for active recovery case to determine attribution and confidence
+        open_case = db.query(RecoveryCase).filter(
+            RecoveryCase.channel_id == channel.id,
+            RecoveryCase.telegram_user_id == telegram_user_id,
+            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED", "NO_RESPONSE", "UNCONTACTABLE"])
+        ).order_by(RecoveryCase.created_at.desc()).first()
+
+        # Strict attribution matrix
+        if invite_id:
+            source = "INVITE_LINK"
+            confidence = "CONFIRMED"
+        elif via_join_request:
+            source = "JOIN_REQUEST"
+            confidence = "ATTRIBUTED"
+        elif open_case and open_case.status in ["CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"]:
+            source = "DIRECT"
+            confidence = "ATTRIBUTED"
+        else:
+            source = "DIRECT"
+            confidence = "UNKNOWN"
+
+        # 3. Idempotent raw membership event log
+        existing_event = db.query(MembershipEvent).filter(
+            MembershipEvent.channel_id == channel.id,
+            MembershipEvent.telegram_user_id == telegram_user_id,
+            MembershipEvent.timestamp == event_date,
+            MembershipEvent.event_type == "JOIN"
+        ).first()
+
+        if not existing_event:
+            raw_event = MembershipEvent(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                event_type="JOIN",
+                invite_id=invite_id,
+                via_join_request=via_join_request,
+                source=source,
+                extra_metadata={
+                    "first_name": first_name,
+                    "username": username,
+                    "invite_link": invite_link_str
+                },
+                timestamp=event_date
+            )
+            db.add(raw_event)
+
+        # 4. Update or create MembershipState projection
+        state = db.query(MembershipState).filter(
+            MembershipState.channel_id == channel.id,
+            MembershipState.telegram_user_id == telegram_user_id
+        ).first()
+        if not state:
+            state = MembershipState(
+                tenant_id=channel.tenant_id,
+                channel_id=channel.id,
+                telegram_user_id=telegram_user_id,
+                status="member",
+                first_join=event_date,
+                last_join=event_date
+            )
+            db.add(state)
+        else:
+            state.status = "member"
+            state.last_join = event_date
+            if not state.first_join:
+                state.first_join = event_date
 
         is_new_member = False
         previous_left_at = None
@@ -488,14 +727,7 @@ class RetentionEngine:
             if username: member.username = username
             db.flush()
 
-        # ── Rejoin Attribution ───────────────────────────────────────────────
-        open_case = db.query(RecoveryCase).filter(
-            RecoveryCase.channel_id == channel.id,
-            RecoveryCase.telegram_user_id == telegram_user_id,
-            RecoveryCase.status.in_(["SCHEDULED", "CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED", "NO_RESPONSE", "UNCONTACTABLE"])
-        ).order_by(RecoveryCase.created_at.desc()).first()
-
-        # If user left previously or had a recovery case, record a RejoinAttempt
+        # 5. Rejoin Attribution
         if previous_left_at or open_case:
             leave_time = previous_left_at or (open_case.created_at if open_case else event_date)
             if leave_time.tzinfo is None:
@@ -505,14 +737,6 @@ class RetentionEngine:
                 rejoin_time = rejoin_time.replace(tzinfo=timezone.utc)
 
             diff_seconds = max(0, int((rejoin_time - leave_time).total_seconds()))
-
-            # Determine confidence level
-            if invite_id:
-                confidence = "CONFIRMED"
-            elif open_case and open_case.status in ["CONTACTED", "CONVERSATION_ACTIVE", "LINK_DELIVERED"]:
-                confidence = "ATTRIBUTED"
-            else:
-                confidence = "UNKNOWN"
 
             rejoin_attempt = RejoinAttempt(
                 tenant_id=channel.tenant_id,
@@ -539,19 +763,38 @@ class RetentionEngine:
                     case_id=open_case.id,
                     direction="OUTBOUND",
                     sender_type="SYSTEM",
-                    text=f"🎉 تم رصد عودة العضو بنجاح إلى القناة بعد {diff_seconds // 60} دقيقة! (درجة الثقة: {confidence})",
+                    text=f"🎉 تم رصد عودة العضو بنجاح إلى القناة بعد {diff_seconds // 60} دقيقة! (المصدر: {source} | درجة الثقة: {confidence})",
                     sent_at=event_date
                 )
                 db.add(sys_msg)
 
-            db.commit()
-            logger.info(f"[🏆 RECOVERY SUCCESS]: User {telegram_user_id} (@{username or 'no_user'}) successfully rejoined channel '{channel.title}'! (Confidence: {confidence})")
-            return
+            logger.info(f"[🏆 RECOVERY SUCCESS]: User {telegram_user_id} (@{username or 'no_user'}) successfully rejoined channel '{channel.title}'! (Source: {source} | Confidence: {confidence})")
+
+        channel.last_event_at = event_date
+        channel.last_success_at = datetime.now(timezone.utc)
+        channel.consecutive_errors = 0
+        channel.health_state = "HEALTHY"
 
         db.commit()
 
-        # ── Welcome Flow for new members ─────────────────────────────────────
-        if is_new_member and settings.is_welcome_enabled and settings.welcome_message_template:
+        # 6. Broadcast to SSE subscribers
+        sse_broadcaster.broadcast(
+            channel_id=channel.id,
+            event_type="join",
+            data={
+                "telegram_user_id": telegram_user_id,
+                "username": username,
+                "first_name": first_name,
+                "timestamp": event_date.isoformat(),
+                "event_type": "JOIN",
+                "source": source,
+                "confidence": confidence,
+                "via_join_request": via_join_request
+            }
+        )
+
+        # 7. Welcome Flow for new members
+        if is_new_member and settings and settings.is_welcome_enabled and settings.welcome_message_template:
             int_hash = int(access_hash) if access_hash else None
             await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name, username, int_hash)
 
@@ -1129,4 +1372,68 @@ class RetentionEngine:
         db.refresh(metric)
         return metric
 
+    def calculate_cohort_winback(
+        self,
+        db: Session,
+        channel_id: str,
+        cohort_start: datetime,
+        cohort_end: datetime,
+        window_days: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Calculates retention/winback rate using cohort-based SQL query.
+        Winback rate = (users who left in cohort AND returned) / (users who left in cohort).
+        """
+        if cohort_start.tzinfo is None:
+            cohort_start = cohort_start.replace(tzinfo=timezone.utc)
+        if cohort_end.tzinfo is None:
+            cohort_end = cohort_end.replace(tzinfo=timezone.utc)
+
+        # 1. Distinct users who left in this cohort window
+        leavers_query = db.query(MembershipEvent.telegram_user_id).filter(
+            MembershipEvent.channel_id == channel_id,
+            MembershipEvent.event_type == "LEAVE",
+            MembershipEvent.timestamp >= cohort_start,
+            MembershipEvent.timestamp <= cohort_end
+        ).distinct()
+        leaver_ids = [row[0] for row in leavers_query.all()]
+        total_leavers = len(leaver_ids)
+
+        if total_leavers == 0:
+            return {
+                "channel_id": channel_id,
+                "cohort_start": cohort_start,
+                "cohort_end": cohort_end,
+                "window": f"{window_days}d" if window_days else "custom",
+                "total_leavers": 0,
+                "total_returned": 0,
+                "winback_rate_percent": 0.0
+            }
+
+        # 2. Distinct leavers who rejoined after cohort_start
+        returned_query = db.query(MembershipEvent.telegram_user_id).filter(
+            MembershipEvent.channel_id == channel_id,
+            MembershipEvent.event_type == "JOIN",
+            MembershipEvent.timestamp > cohort_start,
+            MembershipEvent.telegram_user_id.in_(leaver_ids)
+        )
+        if window_days:
+            max_return_time = cohort_end + timedelta(days=window_days)
+            returned_query = returned_query.filter(MembershipEvent.timestamp <= max_return_time)
+
+        returned_ids = {row[0] for row in returned_query.distinct().all()}
+        total_returned = len(returned_ids)
+        winback_rate = round((total_returned / total_leavers) * 100.0, 2)
+
+        return {
+            "channel_id": channel_id,
+            "cohort_start": cohort_start,
+            "cohort_end": cohort_end,
+            "window": f"{window_days}d" if window_days else "custom",
+            "total_leavers": total_leavers,
+            "total_returned": total_returned,
+            "winback_rate_percent": winback_rate
+        }
+
 retention_engine = RetentionEngine()
+

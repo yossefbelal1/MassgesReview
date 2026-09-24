@@ -1,8 +1,10 @@
+import json
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Response, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_, extract
 
@@ -10,18 +12,19 @@ from backend.app.core.database import get_db
 from backend.app.api.deps import get_current_user, get_current_tenant_id
 from backend.app.models.models import (
     User, Channel, AudienceMember, RecoveryCase, RecoveryMessage, RetentionSetting, ChannelUserbot,
-    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric
+    InviteLink, MembershipEvent, RejoinAttempt, RetentionMetric, MembershipState
 )
 from backend.app.schemas.schemas import (
     RecoveryCaseOut, RecoveryCaseDetailOut, RecoveryMessageOut, RecoveryMessageCreate,
     RetentionSettingOut, RetentionSettingUpdate, AudienceMemberOut, RetentionSummaryOut,
     UserbotSendCodeRequest, UserbotSendCodeResponse, UserbotVerifyCodeRequest, UserbotVerifyCodeResponse,
     ChannelUserbotOut, InviteLinkCreate, InviteLinkOut, MembershipEventOut, RejoinAttemptOut,
-    RetentionMetricOut, ReconciliationResultOut
+    RetentionMetricOut, ReconciliationResultOut, MembershipStateOut, ChannelHealthOut, CohortWinbackOut
 )
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.dedicated_userbot_service import dedicated_userbot_service
 from backend.app.services.retention_engine import retention_engine
+from backend.app.services.sse_service import sse_broadcaster
 
 logger = logging.getLogger("reviewflow.retention")
 router = APIRouter()
@@ -1087,6 +1090,161 @@ def compute_channel_metrics_endpoint(
         raise HTTPException(status_code=404, detail="Channel not found")
 
     return retention_engine.compute_daily_retention_metrics(db, channel_id)
+
+
+@router.get("/channels/{channel_id}/events/stream")
+async def stream_channel_events(
+    channel_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Server-Sent Events (SSE) endpoint for real-time live push of joins, leaves, kicks,
+    and rejoins to connected dashboards.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    async def event_generator():
+        queue = asyncio.Queue(maxsize=100)
+        await sse_broadcaster.subscribe(channel_id, queue)
+        try:
+            init_frame = json.dumps({"channel_id": channel_id, "status": "connected", "title": channel.title})
+            yield f"event: connected\ndata: {init_frame}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    ev = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    yield f"event: {ev['type']}\ndata: {json.dumps(ev['data'])}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            await sse_broadcaster.unsubscribe(channel_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.get("/channels/{channel_id}/health", response_model=ChannelHealthOut)
+def get_channel_health(
+    channel_id: str,
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns channel connection health, lag metrics, and state machine status.
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    now = datetime.now(timezone.utc)
+    lag_seconds = None
+    if channel.last_event_at:
+        ev_time = channel.last_event_at if channel.last_event_at.tzinfo else channel.last_event_at.replace(tzinfo=timezone.utc)
+        lag_seconds = max(0, int((now - ev_time).total_seconds()))
+
+    return ChannelHealthOut(
+        channel_id=channel.id,
+        title=channel.title,
+        health_state=channel.health_state or "HEALTHY",
+        consecutive_errors=channel.consecutive_errors or 0,
+        last_event_at=channel.last_event_at,
+        last_error_at=channel.last_error_at,
+        last_success_at=channel.last_success_at,
+        lag_seconds=lag_seconds
+    )
+
+
+@router.get("/channels/{channel_id}/cohort-winback", response_model=CohortWinbackOut)
+def get_cohort_winback(
+    channel_id: str,
+    window: str = Query("7d", pattern="^(24h|7d|30d)$"),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Calculates retention/winback rate based on leaver cohorts over 24h, 7d, or 30d.
+    Winback rate = (users who left in cohort AND returned) / (users who left in cohort).
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    now = datetime.now(timezone.utc)
+    if window == "24h":
+        start_time = now - timedelta(hours=24)
+        end_time = now
+        window_days = 1
+    elif window == "30d":
+        start_time = now - timedelta(days=30)
+        end_time = now
+        window_days = 30
+    else:  # default 7d
+        start_time = now - timedelta(days=7)
+        end_time = now
+        window_days = 7
+
+    metrics = retention_engine.calculate_cohort_winback(
+        db=db,
+        channel_id=channel_id,
+        cohort_start=start_time,
+        cohort_end=end_time,
+        window_days=window_days
+    )
+    return CohortWinbackOut(**metrics)
+
+
+@router.get("/channels/{channel_id}/membership-state", response_model=List[MembershipStateOut])
+def get_channel_membership_state(
+    channel_id: str,
+    status_filter: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    db: Session = Depends(get_db),
+    tenant_id: str = Depends(get_current_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns current membership state projection for the channel (member, left, kicked, banned).
+    """
+    channel = db.query(Channel).filter(
+        Channel.id == channel_id,
+        Channel.tenant_id == tenant_id
+    ).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    q = db.query(MembershipState).filter(
+        MembershipState.channel_id == channel_id,
+        MembershipState.tenant_id == tenant_id
+    )
+    if status_filter:
+        q = q.filter(MembershipState.status == status_filter.lower())
+
+    return q.order_by(desc(MembershipState.updated_at)).limit(limit).all()
+
 
 
 

@@ -15,7 +15,7 @@ logging.basicConfig(
 
 from backend.app.core.config import settings
 from backend.app.core.database import SessionLocal
-from backend.app.models.models import Channel, Automation, ChannelUserbot
+from backend.app.models.models import Channel, Automation, ChannelUserbot, Job
 from backend.app.services.telegram_service import telegram_service
 from backend.app.services.userbot_pool import userbot_pool
 from backend.app.services.retention_engine import retention_engine
@@ -307,6 +307,58 @@ async def retention_reconciliation_worker():
         # Run every 1 hour (3600s)
         await asyncio.sleep(3600.0)
 
+async def channel_health_watchdog():
+    """
+    Periodic watchdog (every 60s) inspecting connected channels.
+    Maintains channel health state machine:
+    HEALTHY: normal operations, recent events or successful reach.
+    DEGRADED: consecutive errors > 0 and < 5, or delayed checks.
+    RECONNECTING: consecutive errors >= 5, attempting client reach.
+    STOPPED: channel disconnected or tenant inactive.
+    """
+    global CHANNEL_ENTITIES, RUNNING
+    await asyncio.sleep(15.0)
+
+    while RUNNING:
+        try:
+            client = await telegram_service.ensure_connected()
+            db: Session = SessionLocal()
+            channels = db.query(Channel).all()
+            now = datetime.now(timezone.utc)
+
+            for ch in channels:
+                if not ch.is_connected or not ch.tenant or not ch.tenant.is_active:
+                    if ch.health_state != "STOPPED":
+                        ch.health_state = "STOPPED"
+                        db.commit()
+                    continue
+
+                try:
+                    chat_peer = int(ch.telegram_chat_id)
+                    entity = await client.get_entity(chat_peer)
+                    CHANNEL_ENTITIES[chat_peer] = entity
+                    ch.consecutive_errors = 0
+                    ch.health_state = "HEALTHY"
+                    ch.last_success_at = now
+                    db.commit()
+                except Exception as ent_err:
+                    err_msg = str(ent_err).lower()
+                    ch.consecutive_errors = (ch.consecutive_errors or 0) + 1
+                    ch.last_error_at = now
+                    if ch.consecutive_errors >= 5:
+                        ch.health_state = "RECONNECTING"
+                    else:
+                        ch.health_state = "DEGRADED"
+                    db.commit()
+                    if "disconnected" in err_msg or "connection" in err_msg:
+                        await telegram_service.ensure_connected()
+
+            db.close()
+        except Exception as loop_err:
+            print(f"[!] Channel health watchdog error: {loop_err}", flush=True)
+
+        await asyncio.sleep(60.0)
+
 async def keepalive_ping():
     """Keeps the MTProto TCP session alive and healthy 24/7."""
     global RUNNING
@@ -345,6 +397,7 @@ async def main():
         retention_channel_watcher(),
         retention_outreach_dispatcher(),
         retention_reconciliation_worker(),
+        channel_health_watchdog(),
         worker_job_executor(),
         keepalive_ping()
     )
