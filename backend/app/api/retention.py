@@ -244,6 +244,7 @@ def get_retention_summary(
         "total_contact_attempted": total_contacted + uncontactable_count,
         "total_contacted": total_contacted,
         "total_in_conversation": total_in_conversation,
+        "total_responded": total_responded,
         "total_rejoined": total_rejoined,
         "total_scheduled_pending": total_scheduled,
         "total_opt_out": total_opt_out,

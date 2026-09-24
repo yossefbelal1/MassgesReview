@@ -1121,8 +1121,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                   </span>
                 </div>
                 <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-2xl font-bold font-mono text-amber-300">{summary?.total_in_conversation || 0}</span>
-                  <span className="text-[11px] text-slate-500">محادثة نشطة</span>
+                  <span className="text-2xl font-bold font-mono text-amber-300">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</span>
+                  <span className="text-[11px] text-slate-500">
+                    {summary?.total_in_conversation ? `${summary.total_in_conversation} محادثة نشطة` : 'عضو متفاعل'}
+                  </span>
                 </div>
               </div>
 

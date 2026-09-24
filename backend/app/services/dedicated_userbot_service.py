@@ -502,6 +502,24 @@ class DedicatedUserbotService:
                 "uncontactable_reason": "NO_USERNAME_OR_ACCESS_HASH",
                 "can_retry": False
             }
+        except RPCError as rpc_err:
+            err_msg = str(rpc_err).upper()
+            logger.warning(f"[⚠️ RPC Error in dedicated userbot {channel_id} for user {target_user_id}]: {rpc_err}")
+            if any(term in err_msg for term in ["PRIVACY_PREMIUM_REQUIRED", "PRIVACY_RESTRICTED", "USER_PRIVACY", "CHAT_WRITE_FORBIDDEN", "PEER_ID_INVALID", "USER_BANNED"]):
+                return {
+                    "success": False,
+                    "error": "PRIVACY_RESTRICTED",
+                    "error_ar": "إعدادات خصوصية هذا المستخدم (أو اشتراط تيليجرام بريميوم) تمنع مراسلته من الحسابات غير المضافة لديه.",
+                    "uncontactable_reason": "PRIVACY_RESTRICTED" if "PRIVACY" in err_msg else "USER_BLOCKED_OR_DELETED",
+                    "can_retry": False
+                }
+            return {
+                "success": False,
+                "error": str(rpc_err),
+                "error_ar": f"خطأ أثناء الإرسال: {str(rpc_err)}",
+                "can_retry": True,
+                "retry_delay_seconds": 120
+            }
         except Exception as e:
             logger.error(f"Error sending message from dedicated userbot {channel_id}: {e}", exc_info=True)
             userbot.last_error = str(e)

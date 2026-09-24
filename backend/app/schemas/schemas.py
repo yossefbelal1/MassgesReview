@@ -314,6 +314,7 @@ class RetentionSummaryOut(BaseModel):
     total_contact_attempted: int
     total_contacted: int
     total_in_conversation: int
+    total_responded: int = 0
     total_rejoined: int
     total_scheduled_pending: int = 0
     total_opt_out: int = 0

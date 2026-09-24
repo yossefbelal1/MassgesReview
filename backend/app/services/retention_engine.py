@@ -987,49 +987,51 @@ class RetentionEngine:
 
     async def process_pending_recovery_contacts(self, db: Session):
         """
-        Executes scheduled initial recovery contacts with strict safe pacing (15 seconds between contacts).
-        Has circuit breaker: stops immediately on PeerFlood to avoid worsening the ban.
+        Executes scheduled initial recovery contacts per tenant with safe pacing.
+        Fair-queuing ensures no single tenant starves other tenants.
         """
         now = datetime.now(timezone.utc)
-        pending_cases = db.query(RecoveryCase).filter(
-            RecoveryCase.status == "SCHEDULED",
-            RecoveryCase.scheduled_contact_at <= now
-        ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(35).all()
+        active_tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
 
-        if not pending_cases:
-            return
+        for tenant in active_tenants:
+            # Check count of active dedicated userbots for this tenant
+            active_bots = db.query(ChannelUserbot).filter(
+                ChannelUserbot.tenant_id == tenant.id,
+                ChannelUserbot.is_active == True,
+                (
+                    (ChannelUserbot.status == "CONNECTED") |
+                    ((ChannelUserbot.status == "FLOOD_WAIT") & (
+                        (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
+                    ))
+                )
+            ).count()
 
-        # Check count of active dedicated userbots to calculate dynamic safe pacing
-        active_bots = db.query(ChannelUserbot).filter(
-            ChannelUserbot.is_active == True,
-            (
-                (ChannelUserbot.status == "CONNECTED") |
-                ((ChannelUserbot.status == "FLOOD_WAIT") & (
-                    (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
-                ))
-            )
-        ).count()
-        # With 1 bot: 20s. With 2+ bots: 15s delay between overall sends (each individual account gets 30s)
-        pacing_delay = 20.0 if active_bots <= 1 else max(12.0, 30.0 / active_bots)
+            # Dynamic pacing based on dedicated bot count
+            pacing_delay = 20.0 if active_bots <= 1 else max(8.0, 20.0 / active_bots)
 
-        sent_count = 0
-        failed_tenants = set()
-        for case in pending_cases:
-            if case.tenant_id in failed_tenants:
+            pending_cases = db.query(RecoveryCase).filter(
+                RecoveryCase.tenant_id == tenant.id,
+                RecoveryCase.status == "SCHEDULED",
+                RecoveryCase.scheduled_contact_at <= now
+            ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(15).all()
+
+            if not pending_cases:
                 continue
 
-            res = await self.send_recovery_to_case(db, case)
-            if res.get("success"):
-                sent_count += 1
-                await asyncio.sleep(pacing_delay)
-            elif res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD"]:
-                logger.info(f"[⚠️ Outreach Paused for tenant {case.tenant_id}]: {res.get('error')}")
-                failed_tenants.add(case.tenant_id)
-            else:
-                await asyncio.sleep(1.0)
+            sent_count = 0
+            for case in pending_cases:
+                res = await self.send_recovery_to_case(db, case)
+                if res.get("success"):
+                    sent_count += 1
+                    await asyncio.sleep(pacing_delay)
+                elif res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD"]:
+                    logger.info(f"[⚠️ Outreach Paused for tenant {tenant.id}]: {res.get('error')}")
+                    break
+                else:
+                    await asyncio.sleep(1.0)
 
-        if sent_count > 0:
-            logger.info(f"[📊 Outreach Batch]: Sent {sent_count}/{len(pending_cases)} recovery messages this cycle (pacing: {pacing_delay}s).")
+            if sent_count > 0:
+                logger.info(f"[📊 Outreach Batch for {tenant.name}]: Sent {sent_count}/{len(pending_cases)} recovery messages.")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """
