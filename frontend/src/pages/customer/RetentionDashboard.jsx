@@ -550,130 +550,163 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
         </div>
       )}
 
-      {/* Top Header / Channel & Live Status Bar */}
-      <div className="flex items-center justify-between gap-2.5 p-2 sm:p-0 bg-slate-900/60 sm:bg-transparent rounded-2xl sm:rounded-none border border-slate-800/80 sm:border-0">
-        <div className="flex items-center gap-2 sm:gap-3">
-          <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-            <UserCheck className="w-4 h-4" />
+      {/* Top Header & Context Control Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1 border-b border-slate-800/80">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600/20 to-teal-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0 shadow-sm">
+            {activeTab === 'analytics' ? <BarChart3 className="w-5 h-5" /> :
+             activeTab === 'cases' ? <RefreshCw className="w-5 h-5" /> :
+             activeTab === 'members' ? <Users className="w-5 h-5" /> :
+             activeTab === 'settings' ? <Settings className="w-5 h-5" /> :
+             <Bot className="w-5 h-5" />}
           </div>
           <div>
-            <h1 className="text-sm sm:text-lg font-bold text-white tracking-tight flex items-center gap-1.5">
-              <span>استرداد الأعضاء</span>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                {activeTab === 'analytics' && 'تحليلات أسباب المغادرة وقمع الاسترداد'}
+                {activeTab === 'cases' && 'حالات الاسترداد الحية'}
+                {activeTab === 'members' && 'دليل الأعضاء الشامل'}
+                {activeTab === 'settings' && 'قواعد وقوالب الاسترداد'}
+                {activeTab === 'userbots' && 'حسابات الإرسال واليوزربوت'}
+              </h2>
               <span className="flex h-2 w-2 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-            </h1>
-            <span className="text-[10px] text-emerald-400 font-semibold block sm:hidden">رصد واستعادة 24/7</span>
+            </div>
+            <p className="text-xs text-slate-400">
+              {activeTab === 'analytics' && 'مؤشرات الأداء المباشرة وقمع تحويل الأعضاء المستردين'}
+              {activeTab === 'cases' && 'المتابعة اللحظية للمغادرين وحالة رسائل الاسترداد الآلية'}
+              {activeTab === 'members' && 'سجل كامل لأعضاء القنوات وتاريخ انضمامهم ومغادرتهم'}
+              {activeTab === 'settings' && 'تخصيص نصوص الرسائل الذكية والفواصل الزمنية بين الإرسال'}
+              {activeTab === 'userbots' && 'إدارة حسابات تيليجرام المرتبطة والتحقق من حالتها الأمنية'}
+            </p>
           </div>
         </div>
 
-        {/* Channel Selector & Refresh */}
-        <div className="flex items-center gap-2">
+        {/* Global Controls: Channel Selector & Live Refresh */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
           {channels.length > 0 && (
-            <select
-              value={selectedChannelId}
-              onChange={(e) => setSelectedChannelId(e.target.value)}
-              className="px-3 py-1.5 sm:py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-bold outline-none focus:border-emerald-500 max-w-[150px] sm:max-w-none truncate"
-            >
-              <option value="">جميع القنوات</option>
-              {channels.map((ch) => (
-                <option key={ch.id} value={ch.id}>{ch.title}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={selectedChannelId}
+                onChange={(e) => setSelectedChannelId(e.target.value)}
+                className="appearance-none pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs font-semibold outline-none focus:border-emerald-500 cursor-pointer shadow-sm hover:bg-slate-850 transition-colors"
+              >
+                <option value="">جميع القنوات</option>
+                {channels.map((ch) => (
+                  <option key={ch.id} value={ch.id}>{ch.title}</option>
+                ))}
+              </select>
+              <div className="absolute left-2.5 top-2.5 pointer-events-none text-slate-500 text-[10px]">▼</div>
+            </div>
           )}
+
           <button
             onClick={() => fetchData(false)}
             disabled={loading}
-            title="تحديث البيانات فوراً"
-            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-850 active:scale-95 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all"
+            title="تحديث فوري للبيانات"
+            className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 active:scale-95 border border-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${loading ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">تحديث</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Metrics: Compact Mobile App Style Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3">
-        {/* Win-back Rate Card */}
-        <div className="col-span-2 sm:col-span-1 p-3 sm:p-4 rounded-2xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/40 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] sm:text-xs text-emerald-400 font-bold">معدل الاسترداد</span>
-            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+      {/* Executive Metrics Strip: Unified Luxury Instrument Panel */}
+      <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl backdrop-blur-xl shadow-sm overflow-hidden grid grid-cols-2 lg:grid-cols-5 divide-y lg:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-800/60">
+        {/* Win-back Rate */}
+        <div className="col-span-2 sm:col-span-1 p-3.5 sm:p-4.5 flex flex-col justify-between group hover:bg-slate-850/40 transition-colors">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-emerald-400">معدل الاسترداد</span>
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="flex items-baseline justify-between sm:justify-start gap-2">
-            <span className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
+          <div className="flex items-baseline gap-2">
+            <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 tracking-tight">
               {summary?.win_back_rate_percent || 0}%
             </span>
-            <span className="text-[10px] sm:text-[11px] text-emerald-400/80 font-medium">
-              ({summary?.total_rejoined || 0} عادوا من {summary?.total_left_detected || 0})
+            <span className="text-[11px] text-slate-400 font-medium">
+              ({summary?.total_rejoined || 0} عادوا من {summary?.total_contacted || 0} تم التواصل)
             </span>
           </div>
-          {/* Visual Mini Progress Bar */}
-          <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+          <div className="w-full h-1 bg-slate-800/80 rounded-full mt-2.5 overflow-hidden">
             <div 
-              className="h-full bg-emerald-400 rounded-full transition-all duration-500"
+              className="h-full bg-emerald-400 rounded-full transition-all duration-700"
               style={{ width: `${Math.min(100, summary?.win_back_rate_percent || 0)}%` }}
-            ></div>
+            />
           </div>
         </div>
 
-        {/* Total Left */}
-        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] sm:text-xs text-slate-400 font-semibold">المغادرين</span>
-            <Users className="w-3.5 h-3.5 text-slate-500" />
+        {/* Leavers Detected */}
+        <div className="p-3.5 sm:p-4.5 flex flex-col justify-between group hover:bg-slate-850/40 transition-colors">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold">المغادرين المرصودين</span>
+            <Users className="w-4 h-4 text-slate-500" />
           </div>
           <div>
-            <span className="text-xl sm:text-2xl font-black text-white font-mono">{summary?.total_left_detected || 0}</span>
-            <span className="text-[9px] text-slate-500 block">مرصود تلقائياً</span>
+            <span className="text-2xl sm:text-3xl font-black font-mono text-white tracking-tight">
+              {summary?.total_left_detected || 0}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">مرصود تلقائياً 24/7</span>
           </div>
         </div>
 
         {/* Contacted */}
-        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] sm:text-xs text-blue-400 font-semibold">تم التواصل</span>
-            <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+        <div className="p-3.5 sm:p-4.5 flex flex-col justify-between group hover:bg-slate-850/40 transition-colors">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-blue-400">تم التواصل بنجاح</span>
+            <MessageSquare className="w-4 h-4 text-blue-400" />
           </div>
           <div>
-            <span className="text-xl sm:text-2xl font-black text-blue-400 font-mono">{summary?.total_contacted || 0}</span>
-            <span className="text-[9px] text-slate-500 block">رسائل استرداد</span>
+            <span className="text-2xl sm:text-3xl font-black font-mono text-blue-400 tracking-tight">
+              {summary?.total_contacted || 0}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              {summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}% نسبة الوصول للمغادرين
+            </span>
           </div>
         </div>
 
         {/* Rejoined */}
-        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] sm:text-xs text-emerald-400 font-semibold">عادوا للقناة</span>
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+        <div className="p-3.5 sm:p-4.5 flex flex-col justify-between group hover:bg-slate-850/40 transition-colors">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-emerald-400">عادوا للقناة</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">{summary?.total_rejoined || 0}</span>
-            <span className="text-[9px] text-emerald-500/80 block">استرداد ناجح 🎉</span>
+            <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400 tracking-tight">
+              {summary?.total_rejoined || 0}
+            </span>
+            <span className="text-[11px] text-emerald-500/80 block mt-0.5 font-medium">استرداد ناجح ومؤكد</span>
           </div>
         </div>
 
         {/* In Queue */}
-        <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] sm:text-xs text-amber-400 font-semibold">في الطابور</span>
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
+        <div className="p-3.5 sm:p-4.5 flex flex-col justify-between group hover:bg-slate-850/40 transition-colors">
+          <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+            <span className="font-semibold text-amber-400">في الطابور</span>
+            <Clock className="w-4 h-4 text-amber-400" />
           </div>
           <div>
-            <span className="text-xl sm:text-2xl font-black text-amber-400 font-mono">{summary?.total_scheduled_pending || 0}</span>
-            <span className="text-[9px] text-amber-500/80 block">إرسال متتابع ⚡</span>
+            <span className="text-2xl sm:text-3xl font-black font-mono text-amber-400 tracking-tight">
+              {summary?.total_scheduled_pending || 0}
+            </span>
+            <span className="text-[11px] text-slate-500 block mt-0.5">
+              {summary?.total_scheduled_pending ? 'إرسال آلي مجدول' : 'الطابور مكتمل بالكامل ✓'}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 rounded-2xl border border-slate-800 overflow-x-auto text-xs">
+      {/* Navigation Segmented Controller: Low-profile, sleek, non-intrusive */}
+      <div className="flex items-center gap-1 p-1 bg-slate-950/70 rounded-xl border border-slate-800/80 overflow-x-auto text-xs scrollbar-none">
         <button
           onClick={() => handleTabSelect('cases')}
-          className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
-            activeTab === 'cases' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          className={`px-3.5 py-1.5 rounded-lg font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+            activeTab === 'cases' 
+              ? 'bg-slate-800 text-white shadow-sm border border-slate-700/60' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
           }`}
         >
           <RefreshCw className="w-3.5 h-3.5" />
@@ -682,8 +715,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
         <button
           onClick={() => handleTabSelect('analytics')}
-          className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
-            activeTab === 'analytics' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          className={`px-3.5 py-1.5 rounded-lg font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+            activeTab === 'analytics' 
+              ? 'bg-slate-800 text-white shadow-sm border border-slate-700/60' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
           }`}
         >
           <BarChart3 className="w-3.5 h-3.5" />
@@ -692,8 +727,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
         <button
           onClick={() => handleTabSelect('members')}
-          className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
-            activeTab === 'members' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          className={`px-3.5 py-1.5 rounded-lg font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+            activeTab === 'members' 
+              ? 'bg-slate-800 text-white shadow-sm border border-slate-700/60' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
           }`}
         >
           <Users className="w-3.5 h-3.5" />
@@ -702,8 +739,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
         <button
           onClick={() => handleTabSelect('settings')}
-          className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
-            activeTab === 'settings' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          className={`px-3.5 py-1.5 rounded-lg font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+            activeTab === 'settings' 
+              ? 'bg-slate-800 text-white shadow-sm border border-slate-700/60' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
           }`}
         >
           <Settings className="w-3.5 h-3.5" />
@@ -712,8 +751,10 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
 
         <button
           onClick={() => handleTabSelect('userbots')}
-          className={`px-4 py-2.5 rounded-xl font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
-            activeTab === 'userbots' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
+          className={`px-3.5 py-1.5 rounded-lg font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+            activeTab === 'userbots' 
+              ? 'bg-slate-800 text-white shadow-sm border border-slate-700/60' 
+              : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
           }`}
         >
           <Bot className="w-3.5 h-3.5" />
@@ -1063,82 +1104,185 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
       {/* ── TAB 2: FEEDBACK & CHURN ANALYTICS ──────────────────────────────── */}
       {activeTab === 'analytics' && (
         <div className="space-y-4">
-          {/* Section 1: Clean Focused Overview */}
-          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
+          {/* Section 1: Connected Retention Funnel Pipeline */}
+          <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Target className="w-4 h-4 text-emerald-400" />
-                  <span>دورة المتابعة والاسترداد</span>
+                  <Activity className="w-4 h-4 text-emerald-400" />
+                  <span>مسار دورة الاسترداد والتحويل (Retention Funnel)</span>
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  رصد فوري للمغادرين مع إرسال آلي بفواصل 15 ثانية لحماية حسابك
+                  تتبع مسار انتقال العضو خطوة بخطوة من لحظة المغادرة وحتى العودة للقناة بنجاح
                 </p>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  تفاعل الأعضاء: <strong className="text-emerald-400 font-mono">{summary?.response_rate_percent || 0}%</strong>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  معدل استرداد المتواصل معهم: <strong className="text-emerald-400 font-mono font-bold">{summary?.win_back_rate_percent || 0}%</strong>
                 </span>
                 <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-300">
-                  نسبة الاسترداد الكلية: <strong className="text-emerald-400 font-mono">{summary?.win_back_rate_percent || 0}%</strong>
+                  معدل التفاعل: <strong className="text-amber-400 font-mono font-bold">{summary?.response_rate_percent || 0}%</strong>
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Card 1: Leavers Detected */}
-              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                  <span>إجمالي المغادرين</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">رصد لحظي</span>
+            {/* Connected Funnel Stages: 4 Sequential Steps */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 border border-slate-800/90 rounded-2xl bg-slate-950/80 overflow-hidden divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-800/80">
+              {/* Stage 1: Detection */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50">
+                      مرحلة 01
+                    </span>
+                    <span className="text-[11px] text-slate-400">رصد لحظي</span>
+                  </div>
+                  <div className="text-slate-300 font-bold text-xs mb-1">رصد المغادرة</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl sm:text-3xl font-black font-mono text-white">
+                      {summary?.total_left_detected || 0}
+                    </span>
+                    <span className="text-[11px] text-slate-500">عضو مغادر</span>
+                  </div>
                 </div>
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-2xl font-bold font-mono text-white">{summary?.total_left_detected || 0}</span>
-                  <span className="text-[11px] text-slate-500">عضو مغادر</span>
+                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">قاعدة البداية:</span>
+                  <span className="font-mono text-slate-300 font-semibold">100% رصد</span>
                 </div>
               </div>
 
-              {/* Card 2: Contacted */}
-              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                  <span>تم التواصل معهم</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900/40 font-mono">
-                    {summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}%
+              {/* Stage 2: Outreach */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-950/60 text-blue-400 border border-blue-900/40">
+                      مرحلة 02
+                    </span>
+                    <span className="text-[11px] text-blue-400 font-mono font-bold">
+                      {summary?.total_left_detected ? Math.round(((summary?.total_contacted || 0) / summary.total_left_detected) * 100) : 0}% تغطية
+                    </span>
+                  </div>
+                  <div className="text-slate-300 font-bold text-xs mb-1">المراسلة الآلية</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl sm:text-3xl font-black font-mono text-white">
+                      {summary?.total_contacted || 0}
+                    </span>
+                    <span className="text-[11px] text-slate-500">تمت مراسلته</span>
+                  </div>
+                </div>
+                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">نسبة الوصول:</span>
+                  <span className="font-mono text-blue-400 font-semibold">
+                    {summary?.total_left_detected ? ((summary?.total_contacted || 0) / summary.total_left_detected * 100).toFixed(1) : 0}%
                   </span>
                 </div>
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-2xl font-bold font-mono text-white">{summary?.total_contacted || 0}</span>
-                  <span className="text-[11px] text-slate-500">تمت مراسلته</span>
-                </div>
               </div>
 
-              {/* Card 3: Replied */}
-              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
-                  <span>ردوا وتفاعلوا</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900/40 font-mono">
+              {/* Stage 3: Engagement */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-amber-950/60 text-amber-400 border border-amber-900/40">
+                      مرحلة 03
+                    </span>
+                    <span className="text-[11px] text-amber-400 font-mono font-bold">
+                      {summary?.response_rate_percent || 0}% استجابة
+                    </span>
+                  </div>
+                  <div className="text-slate-300 font-bold text-xs mb-1">التفاعل والردود</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl sm:text-3xl font-black font-mono text-amber-300">
+                      {summary?.total_responded ?? (summary?.total_in_conversation || 0)}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {summary?.total_in_conversation ? `${summary.total_in_conversation} محادثة نشطة` : 'عضو متفاعل'}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-4 pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">من المتواصل معهم:</span>
+                  <span className="font-mono text-amber-400 font-semibold">
                     {summary?.response_rate_percent || 0}%
                   </span>
                 </div>
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-2xl font-bold font-mono text-amber-300">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</span>
-                  <span className="text-[11px] text-slate-500">
-                    {summary?.total_in_conversation ? `${summary.total_in_conversation} محادثة نشطة` : 'عضو متفاعل'}
-                  </span>
-                </div>
               </div>
 
-              {/* Card 4: Rejoined */}
-              <div className="p-4 rounded-xl bg-slate-950/70 border border-slate-800/80">
-                <div className="flex items-center justify-between text-emerald-400 text-xs font-medium">
-                  <span>عادوا للقناة</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-900/40 font-mono">
+              {/* Stage 4: Win-Back */}
+              <div className="p-4 sm:p-5 flex flex-col justify-between hover:bg-slate-900/40 transition-colors relative bg-emerald-950/10">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/50">
+                      مرحلة 04 🎯
+                    </span>
+                    <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                      {summary?.win_back_rate_percent || 0}% نجاح
+                    </span>
+                  </div>
+                  <div className="text-emerald-400 font-bold text-xs mb-1">نجاح الاسترداد</div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
+                      {summary?.total_rejoined || 0}
+                    </span>
+                    <span className="text-[11px] text-emerald-500/80">عادوا للقناة</span>
+                  </div>
+                </div>
+                <div className="mt-4 pt-2.5 border-t border-emerald-900/30 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500">معدل الاسترداد الفعلي:</span>
+                  <span className="font-mono text-emerald-400 font-bold">
                     {summary?.win_back_rate_percent || 0}%
                   </span>
                 </div>
-                <div className="mt-3 flex items-baseline justify-between">
-                  <span className="text-2xl font-bold font-mono text-emerald-400">{summary?.total_rejoined || 0}</span>
-                  <span className="text-[11px] text-slate-500">استرداد ناجح</span>
+              </div>
+            </div>
+
+            {/* Visual Funnel Progression Bar */}
+            <div className="space-y-2 pt-1">
+              <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-950 border border-slate-800">
+                {(() => {
+                  const total = Math.max(1, summary?.total_left_detected || 1);
+                  const rejoined = summary?.total_rejoined || 0;
+                  const responded = Math.max(0, (summary?.total_responded ?? 0) - rejoined);
+                  const contacted = Math.max(0, (summary?.total_contacted || 0) - (summary?.total_responded ?? 0));
+                  const queue = Math.max(0, total - (summary?.total_contacted || 0));
+
+                  const pRejoined = Math.round((rejoined / total) * 100);
+                  const pResponded = Math.round((responded / total) * 100);
+                  const pContacted = Math.round((contacted / total) * 100);
+                  const pQueue = Math.max(0, 100 - pRejoined - pResponded - pContacted);
+
+                  return (
+                    <>
+                      <div style={{ width: `${pRejoined}%` }} className="h-full bg-emerald-500 transition-all duration-500" title={`تم الاسترداد: ${rejoined}`} />
+                      <div style={{ width: `${pResponded}%` }} className="h-full bg-amber-500 transition-all duration-500" title={`تفاعلوا وردوا: ${responded}`} />
+                      <div style={{ width: `${pContacted}%` }} className="h-full bg-blue-500 transition-all duration-500" title={`تم التواصل معهم: ${contacted}`} />
+                      <div style={{ width: `${pQueue}%` }} className="h-full bg-slate-800 transition-all duration-500" title={`في الطابور / انتظار: ${queue}`} />
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Funnel Metrics Breakdown Legend */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] pt-1">
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                  <span>عادوا للقناة:</span>
+                  <strong className="text-white font-mono">{summary?.total_rejoined || 0}</strong>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                  <span>ردود وتفاعل:</span>
+                  <strong className="text-white font-mono">{summary?.total_responded ?? (summary?.total_in_conversation || 0)}</strong>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
+                  <span>تمت مراسلتهم:</span>
+                  <strong className="text-white font-mono">{summary?.total_contacted || 0}</strong>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-slate-600 shrink-0" />
+                  <span>في انتظار الإرسال:</span>
+                  <strong className="text-white font-mono">{summary?.total_scheduled_pending || 0}</strong>
                 </div>
               </div>
             </div>

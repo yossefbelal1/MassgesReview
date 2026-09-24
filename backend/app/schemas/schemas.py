@@ -319,6 +319,7 @@ class RetentionSummaryOut(BaseModel):
     total_scheduled_pending: int = 0
     total_opt_out: int = 0
     win_back_rate_percent: float
+    win_back_rate_of_leavers: Optional[float] = 0.0
     uncontactable_count: int
     average_rejoin_hours: float
     reasons_breakdown: List[dict] = []

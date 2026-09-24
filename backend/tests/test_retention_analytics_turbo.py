@@ -93,7 +93,8 @@ def test_retention_summary_funnel_and_status_distribution(client: TestClient, db
     assert data["total_rejoined"] == 1  # c1
     assert data["uncontactable_count"] == 1  # c5
     assert data["total_scheduled_pending"] == 1  # c4
-    assert data["win_back_rate_percent"] == 20.0  # 1 / 5 = 20%
+    assert data["win_back_rate_percent"] == 33.3  # 1 rejoined out of 3 contacted = 33.3%
+    assert data["win_back_rate_of_leavers"] == 20.0  # 1 rejoined out of 5 total leavers = 20%
 
     # Response rate: 2 responded out of 3 contacted = 66.7%
     assert data["response_rate_percent"] == 66.7
@@ -108,6 +109,7 @@ def test_retention_summary_funnel_and_status_distribution(client: TestClient, db
     assert stages[2]["id"] == "responded" and stages[2]["count"] == 2
     assert stages[3]["id"] == "link_delivered" and stages[3]["count"] == 2
     assert stages[4]["id"] == "rejoined" and stages[4]["count"] == 1
+    assert stages[4]["percentage"] == 33.3
 
     # Status distribution accounts for all 5 cases
     status_dist = data["status_distribution"]

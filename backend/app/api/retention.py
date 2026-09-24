@@ -67,7 +67,8 @@ def get_retention_summary(
         )
     ).count()
 
-    win_back_rate = round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0
+    win_back_rate = round((total_rejoined / total_contacted * 100), 1) if total_contacted > 0 else 0.0
+    win_back_rate_of_leavers = round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0
     response_rate = round((total_responded / total_contacted * 100), 1) if total_contacted > 0 else 0.0
     conversion_on_response = round((total_rejoined / total_responded * 100), 1) if total_responded > 0 else 0.0
 
@@ -99,21 +100,21 @@ def get_retention_summary(
             "id": "responded",
             "name": "تفاعل وردود الأعضاء",
             "count": total_responded,
-            "percentage": round((total_responded / total_left * 100), 1) if total_left > 0 else 0.0,
+            "percentage": round((total_responded / total_contacted * 100), 1) if total_contacted > 0 else 0.0,
             "color": "amber"
         },
         {
             "id": "link_delivered",
             "name": "تم تسليم رابط العودة",
             "count": total_link_delivered,
-            "percentage": round((total_link_delivered / total_left * 100), 1) if total_left > 0 else 0.0,
+            "percentage": round((total_link_delivered / total_contacted * 100), 1) if total_contacted > 0 else 0.0,
             "color": "teal"
         },
         {
             "id": "rejoined",
             "name": "عادوا للقناة بنجاح 🎯",
             "count": total_rejoined,
-            "percentage": round((total_rejoined / total_left * 100), 1) if total_left > 0 else 0.0,
+            "percentage": win_back_rate,
             "color": "emerald"
         }
     ]
@@ -249,6 +250,7 @@ def get_retention_summary(
         "total_scheduled_pending": total_scheduled,
         "total_opt_out": total_opt_out,
         "win_back_rate_percent": win_back_rate,
+        "win_back_rate_of_leavers": win_back_rate_of_leavers,
         "uncontactable_count": uncontactable_count,
         "average_rejoin_hours": avg_rejoin_hours,
         "reasons_breakdown": reasons_breakdown,
