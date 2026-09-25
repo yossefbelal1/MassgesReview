@@ -982,14 +982,20 @@ class RetentionEngine:
                     userbot_id=matching_bot.id
                 )
 
-        if not assigned_bot_name or (not res.get("success") and res.get("error") == "NO_DEDICATED_USERBOT"):
+        can_failover = (not assigned_bot_name) or (
+            not res.get("success") and res.get("error") in ["NO_DEDICATED_USERBOT", "CANNOT_RESOLVE_PEER"] and not case.first_contacted_at
+        )
+
+        if can_failover:
             ordered_userbots = []
             if ready_userbots:
-                # Sort for fair distribution
-                ready_userbots.sort(key=lambda ub: ub.id)
-                start_idx = self._rr_index % len(ready_userbots)
-                self._rr_index += 1
-                ordered_userbots = ready_userbots[start_idx:] + ready_userbots[:start_idx]
+                failed_id = matching_bot.id if (assigned_bot_name and matching_bot) else None
+                candidates = [ub for ub in ready_userbots if ub.id != failed_id]
+                candidates.sort(key=lambda ub: ub.id)
+                if candidates:
+                    start_idx = self._rr_index % len(candidates)
+                    self._rr_index += 1
+                    ordered_userbots = candidates[start_idx:] + candidates[:start_idx]
 
             # Try candidate accounts in sequence (failover chain)
             for bot in ordered_userbots:
@@ -1005,6 +1011,8 @@ class RetentionEngine:
                 )
                 if send_res.get("success"):
                     res = send_res
+                    case.assigned_userbot = bot.username or bot.phone
+                    db.commit()
                     break
                 else:
                     err = send_res.get("error", "")
