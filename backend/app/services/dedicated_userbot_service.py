@@ -42,6 +42,7 @@ class DedicatedUserbotService:
         self._clients: Dict[str, TelegramClient] = {}
         self._last_message_times: Dict[str, float] = {}
         self._last_spambot_checks: Dict[str, float] = {}
+        self._hourly_message_timestamps: Dict[str, list] = {}
 
     async def send_login_code(
         self,
@@ -368,13 +369,30 @@ class DedicatedUserbotService:
             userbot.daily_contacts_count = 0
             db.commit()
 
-        if userbot.daily_contacts_count >= 35:
+        if userbot.daily_contacts_count >= 30:
             return {
                 "success": False,
                 "error": "DAILY_QUOTA_REACHED",
-                "error_ar": "تم بلوغ الحد الأقصى للمراسلات اليومية لهذا الحساب (35 رسالة).",
+                "error_ar": "تم بلوغ الحد الأقصى للمراسلات اليومية لهذا الحساب (30 رسالة) للحفاظ على أمانه التام ضد أي حظر.",
                 "can_retry": True,
                 "retry_delay_seconds": 3600
+            }
+
+        # Safe Hourly Velocity Limiter (Max 8 cold messages/hour per bot)
+        now_ts = time.time()
+        bot_key = userbot.id or channel_id
+        recent_timestamps = [t for t in self._hourly_message_timestamps.get(bot_key, []) if now_ts - t < 3600]
+        self._hourly_message_timestamps[bot_key] = recent_timestamps
+        if len(recent_timestamps) >= 8:
+            oldest = min(recent_timestamps)
+            cooldown_sec = max(60, int(3600 - (now_ts - oldest)))
+            logger.info(f"[🛡️ Hourly Safety Cap]: Bot {userbot.username or bot_key} reached 8 messages this hour. Pausing for {cooldown_sec}s.")
+            return {
+                "success": False,
+                "error": "HOURLY_RATE_LIMIT",
+                "error_ar": f"حماية تيليجرام التلقائية: تم إرسال الحد الأقصى الآمن لهذه الساعة (8 رسائل). فترة راحة مؤقتة لـ {cooldown_sec // 60} دقيقة لحماية الحساب من الليمت والسبام.",
+                "can_retry": True,
+                "retry_delay_seconds": cooldown_sec
             }
 
         # Check cooldown
@@ -409,12 +427,14 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 300
             }
 
-        # Fast minimal anti-spam pacing (1.5 - 3.0s) per userbot
-        bot_key = userbot.id or channel_id
+        # Natural Human Anti-Spam Pacing (40.0 - 75.0s between cold sends on this account)
         last_sent = self._last_message_times.get(bot_key, 0.0)
         elapsed = time.time() - last_sent
-        if elapsed < 2.0:
-            await asyncio.sleep(random.uniform(1.5, 3.0))
+        target_interval = random.uniform(40.0, 75.0)
+        if elapsed < target_interval:
+            wait_needed = target_interval - elapsed
+            logger.info(f"[☕ Human Pacing for {userbot.username or bot_key}]: Waiting {wait_needed:.1f}s before next contact to simulate natural human activity...")
+            await asyncio.sleep(wait_needed)
 
         try:
             # Resolve target entity intelligently across userbot sessions
@@ -485,10 +505,21 @@ class DedicatedUserbotService:
                     except Exception:
                         entity = int(target_user_id)
 
-            # Simulate natural human typing action to satisfy Telegram anti-spam heuristics
+            # ── HUMAN BEHAVIOR SIMULATION ─────────────────────────────────────
+            # 1. Mark chat read / acknowledge open
             try:
+                await client.send_read_acknowledge(entity)
+            except Exception:
+                pass
+
+            # 2. Reading hesitation pause (simulating a human reading profile/chat)
+            await asyncio.sleep(random.uniform(2.5, 4.5))
+
+            # 3. Realistic typing action based on text length (~30 chars/second)
+            try:
+                typing_sec = min(7.5, max(3.0, (len(text) / 30.0) + random.uniform(0.5, 1.8)))
                 async with client.action(entity, 'typing'):
-                    await asyncio.sleep(random.uniform(1.2, 2.2))
+                    await asyncio.sleep(typing_sec)
             except Exception:
                 pass
 
@@ -496,7 +527,13 @@ class DedicatedUserbotService:
             userbot.daily_contacts_count += 1
             userbot.status = "CONNECTED"
             userbot.last_error = None
-            self._last_message_times[bot_key] = time.time()
+            
+            # Record finish timestamps
+            finish_ts = time.time()
+            self._last_message_times[bot_key] = finish_ts
+            if bot_key not in self._hourly_message_timestamps:
+                self._hourly_message_timestamps[bot_key] = []
+            self._hourly_message_timestamps[bot_key].append(finish_ts)
             db.commit()
 
             bot_display = userbot.username or userbot.first_name or f"Userbot_{userbot.phone}"

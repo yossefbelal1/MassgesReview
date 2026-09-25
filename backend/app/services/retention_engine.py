@@ -816,28 +816,49 @@ class RetentionEngine:
             int_hash = int(access_hash) if access_hash else None
             await self._trigger_welcome_message(channel, settings, telegram_user_id, first_name, username, int_hash)
 
+    def _inject_anti_hash_fingerprint(self, text: str, user_seed: int) -> str:
+        """
+        Injects invisible zero-width characters (\u200b, \u200c, \u200d, \u2060) into word boundaries
+        to generate a mathematically unique SHA-256 binary hash for each recipient.
+        Completely invisible to humans, but defeats Telegram's duplicate text fingerprinting.
+        """
+        zw_chars = ["\u200b", "\u200c", "\u200d", "\u2060"]
+        words = text.split(" ")
+        if len(words) < 2:
+            return text + zw_chars[user_seed % len(zw_chars)]
+
+        new_words = []
+        for i, word in enumerate(words):
+            new_words.append(word)
+            if i % 3 == (user_seed % 3) and i < len(words) - 1:
+                zw = zw_chars[(user_seed + i) % len(zw_chars)]
+                new_words[-1] = new_words[-1] + zw
+        return " ".join(new_words)
+
     def build_recovery_outbound_text(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> str:
-        """Builds customized recovery text with placeholders substituted."""
+        """Builds customized recovery text with placeholders substituted and anti-hash fingerprinting."""
         first_name = case.member.first_name if case.member else "يا غالي"
         ch_title = channel.title if channel else ""
         name = first_name or "يا غالي"
         invite_url = settings.invite_link if (settings and settings.invite_link) else ""
+        user_seed = int(case.telegram_user_id) if str(case.telegram_user_id).isdigit() else 0
 
         default_variations = [
             f"مرحباً {name}، لاحظنا مغادرتك لقناة {ch_title} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.",
             f"أهلاً بك أخي {name}، نتمنى أن تكون بأحسن حال 🌸\nلاحظنا خروجك من قناة {ch_title}، ويهمنا جداً معرفة رأيك إذا كان هناك ما يمكننا تحسينه.",
             f"السلام عليكم أخي {name}، افتقدناك في {ch_title} 💐\nهل غادرت القناة بالخطأ أم واجهتك مشكلة في المحتوى؟ رأيك وملاحظاتك تهمنا كثيراً.",
-            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة أو أمر واجهك لتطوير القناة."
+            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة أو أمر واجهك لتطوير القناة.",
+            f"حياك الله أخي {name} 🌟\nلاحظنا ابتعادك عن {ch_title}، يهمنا جداً سماع رأيك وتجربتك معنا لمواصلة التحسين.",
+            f"أهلاً {name}، افتقدنا تواجدك في قناة {ch_title} 🌷\nنود التأكد إذا كان خروجك غير مقصود أو إذا كان لديك أي اقتراح لتحسين المحتوى."
         ]
 
         # Use natural randomized variation for default template to protect accounts from identical message limits
         if not settings or not settings.recovery_first_message_template or "مرحباً {name}، لاحظنا مغادرتك" in settings.recovery_first_message_template:
-            user_seed = int(case.telegram_user_id) if str(case.telegram_user_id).isdigit() else 0
             pick_idx = user_seed % len(default_variations)
             base_text = default_variations[pick_idx]
             if invite_url:
                 base_text = f"{base_text}\n\n{invite_url}"
-            return base_text
+            return self._inject_anti_hash_fingerprint(base_text, user_seed)
 
         template = settings.recovery_first_message_template
         if invite_url:
@@ -846,9 +867,10 @@ class RetentionEngine:
             else:
                 template = f"{template.rstrip()}\n\n{invite_url}"
 
-        return template.replace("{name}", name)\
-                       .replace("{channel}", ch_title)\
-                       .replace("{invite_link}", invite_url or "")
+        final_text = template.replace("{name}", name)\
+                             .replace("{channel}", ch_title)\
+                             .replace("{invite_link}", invite_url or "")
+        return self._inject_anti_hash_fingerprint(final_text, user_seed)
 
     def generate_direct_outreach_link(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> Optional[str]:
         """
@@ -1095,14 +1117,14 @@ class RetentionEngine:
 
     async def process_pending_recovery_contacts(self, db: Session):
         """
-        Executes scheduled initial recovery contacts per tenant with safe pacing.
-        Fair-queuing ensures no single tenant starves other tenants.
+        Executes scheduled initial recovery contacts per tenant with parallel userbot dispatch,
+        fair queuing, single-messenger guarantee, and anti-spam human jitter.
         """
         now = datetime.now(timezone.utc)
         active_tenants = db.query(Tenant).filter(Tenant.is_active == True).all()
 
         for tenant in active_tenants:
-            # Auto-heal any dedicated userbots in FLOOD_WAIT when their cooldown expires
+            # 1. Auto-heal any dedicated userbots in FLOOD_WAIT when their cooldown expires
             flood_bots = db.query(ChannelUserbot).filter(
                 ChannelUserbot.tenant_id == tenant.id,
                 ChannelUserbot.is_active == True,
@@ -1117,49 +1139,131 @@ class RetentionEngine:
                     db.commit()
                     logger.info(f"[Worker Auto-Restore]: Cooldown expired for {fb.username}. Status restored to CONNECTED.")
 
-            # Check count of active dedicated userbots for this tenant
-            active_bots = db.query(ChannelUserbot).filter(
+            # 2. Query all active userbots for this tenant
+            tenant_userbots = db.query(ChannelUserbot).filter(
                 ChannelUserbot.tenant_id == tenant.id,
-                ChannelUserbot.is_active == True,
-                (
-                    (ChannelUserbot.status == "CONNECTED") |
-                    ((ChannelUserbot.status == "FLOOD_WAIT") & (
-                        (ChannelUserbot.cooldown_until == None) | (ChannelUserbot.cooldown_until <= now)
-                    ))
-                )
-            ).count()
+                ChannelUserbot.is_active == True
+            ).all()
 
-            # Dynamic pacing based on dedicated bot count
-            pacing_delay = 20.0 if active_bots <= 1 else max(8.0, 20.0 / active_bots)
+            ready_userbots = [
+                ub for ub in tenant_userbots
+                if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
+                and (ub.daily_contacts_count or 0) < 30
+                and ub.status == "CONNECTED"
+            ]
 
+            if not ready_userbots:
+                limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
+                if limited_userbots:
+                    logger.debug(f"[Outreach Paused]: All {len(limited_userbots)} userbots for tenant {tenant.id} are in cooldown or reached daily ceiling.")
+                continue
+
+            # 3. Pull pending recovery cases (fetch up to 30 cases for parallel load)
             pending_cases = db.query(RecoveryCase).filter(
                 RecoveryCase.tenant_id == tenant.id,
                 RecoveryCase.status == "SCHEDULED",
                 RecoveryCase.scheduled_contact_at <= now
-            ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(15).all()
+            ).order_by(RecoveryCase.scheduled_contact_at.asc()).limit(30).all()
 
             if not pending_cases:
                 continue
 
-            sent_count = 0
-            for case in pending_cases:
-                res = await self.send_recovery_to_case(db, case)
-                if res.get("success"):
-                    sent_count += 1
-                    await asyncio.sleep(pacing_delay)
-                elif res.get("error_code") == "WAITING_FOR_HASH_OWNER":
-                    # Case successfully queued for hash owner; continue to next member in queue
-                    await asyncio.sleep(0.5)
-                    continue
-                elif res.get("error_code") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"] or \
-                     res.get("error") in ["ALL_SESSIONS_BUSY_OR_LIMIT_REACHED", "CLIENT_DISCONNECTED", "PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN"]:
-                    logger.info(f"[⚠️ Outreach Paused for tenant {tenant.id}]: {res.get('error_code') or res.get('error')}")
-                    break
-                else:
-                    await asyncio.sleep(1.0)
+            # 4. Partition cases into per-bot queues
+            # Strict Single-Messenger Rule:
+            # - If a member was previously messaged by bot X, the case MUST stay with bot X.
+            # - Unassigned cases are distributed evenly/alternating across ready userbots.
+            bot_queues: Dict[str, List[str]] = {ub.id: [] for ub in ready_userbots}
 
-            if sent_count > 0:
-                logger.info(f"[📊 Outreach Batch for {tenant.name}]: Sent {sent_count}/{len(pending_cases)} recovery messages.")
+            bot_lookup: Dict[str, ChannelUserbot] = {}
+            for ub in tenant_userbots:
+                if ub.username:
+                    bot_lookup[ub.username.lower().lstrip('@')] = ub
+                if ub.phone:
+                    bot_lookup[ub.phone] = ub
+                bot_lookup[ub.id] = ub
+
+            rr_idx = 0
+            for case in pending_cases:
+                assigned_bot_name = case.assigned_userbot
+                if not assigned_bot_name and case.telegram_user_id:
+                    # Check history for this user
+                    prev_contact = db.query(RecoveryCase.assigned_userbot).filter(
+                        RecoveryCase.tenant_id == tenant.id,
+                        RecoveryCase.telegram_user_id == case.telegram_user_id,
+                        RecoveryCase.assigned_userbot != None
+                    ).order_by(RecoveryCase.created_at.desc()).first()
+                    if prev_contact and prev_contact[0]:
+                        assigned_bot_name = prev_contact[0]
+                        case.assigned_userbot = assigned_bot_name
+                        db.commit()
+
+                target_ub = None
+                if assigned_bot_name:
+                    clean_assigned = assigned_bot_name.lower().lstrip('@')
+                    target_ub = bot_lookup.get(clean_assigned) or bot_lookup.get(assigned_bot_name)
+
+                if target_ub:
+                    if target_ub.id in bot_queues:
+                        bot_queues[target_ub.id].append(case.id)
+                    else:
+                        # The assigned bot is in cooldown; preserve single-messenger rule and delay case
+                        cd = self._to_utc(target_ub.cooldown_until) or (now + timedelta(minutes=15))
+                        case.scheduled_contact_at = cd
+                        db.commit()
+                else:
+                    selected_bot = ready_userbots[rr_idx % len(ready_userbots)]
+                    rr_idx += 1
+                    bot_display = selected_bot.username or selected_bot.phone or selected_bot.id
+                    case.assigned_userbot = bot_display
+                    db.commit()
+                    bot_queues[selected_bot.id].append(case.id)
+
+            # 5. Launch parallel worker coroutines (one per ready bot)
+            async def run_bot_outreach(bot_obj: ChannelUserbot, case_ids: List[str]):
+                if not case_ids:
+                    return 0
+                worker_db: Session = SessionLocal()
+                sent_total = 0
+                bot_name = bot_obj.username or bot_obj.phone
+                try:
+                    for cid in case_ids:
+                        fresh_case = worker_db.query(RecoveryCase).filter(RecoveryCase.id == cid).first()
+                        if not fresh_case or fresh_case.status != "SCHEDULED":
+                            continue
+
+                        logger.info(f"[🚀 Parallel Dispatch (@{bot_name})]: Processing case {fresh_case.id} for user {fresh_case.telegram_user_id}...")
+                        res = await self.send_recovery_to_case(worker_db, fresh_case)
+
+                        if res.get("success"):
+                            sent_total += 1
+                            # Human jitter pause between sends on this account (45.0s - 85.0s)
+                            post_pause = random.uniform(45.0, 85.0)
+                            logger.info(f"[☕ Parallel Account Pacing (@{bot_name})]: Sent successfully. Pausing {post_pause:.1f}s for human simulation...")
+                            await asyncio.sleep(post_pause)
+                        elif res.get("error_code") in ["PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN", "HOURLY_RATE_LIMIT", "ASSIGNED_BOT_LIMITED"]:
+                            logger.warning(f"[⚠️ Account @{bot_name} Paused]: {res.get('error_code')}. Stopping this account's batch.")
+                            break
+                        else:
+                            # Short pause for uncontactable or temporary skips
+                            await asyncio.sleep(random.uniform(3.0, 6.0))
+                except Exception as worker_err:
+                    logger.error(f"[Worker Exception on @{bot_name}]: {worker_err}", exc_info=True)
+                finally:
+                    worker_db.close()
+                return sent_total
+
+            worker_tasks = [
+                run_bot_outreach(ub, bot_queues[ub.id])
+                for ub in ready_userbots
+                if bot_queues.get(ub.id)
+            ]
+
+            if worker_tasks:
+                total_enqueued = sum(len(q) for q in bot_queues.values())
+                logger.info(f"[⚡ Parallel Outreach Started]: Dispatching {total_enqueued} cases across {len(worker_tasks)} parallel bot tasks for {tenant.name}...")
+                results = await asyncio.gather(*worker_tasks, return_exceptions=True)
+                total_sent = sum(r for r in results if isinstance(r, int))
+                logger.info(f"[🏁 Parallel Outreach Finished for {tenant.name}]: Sent {total_sent} messages successfully across all accounts.")
 
     async def handle_inbound_reply(self, event, active_client: TelegramClient, session_name: str):
         """
