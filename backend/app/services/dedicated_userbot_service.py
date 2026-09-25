@@ -580,16 +580,15 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 60
             }
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Setting FLOOD_WAIT and checking auto-healer...")
+            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Checking SpamBot auto-healer...")
             userbot.status = "FLOOD_WAIT"
             userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=900)
             userbot.last_error = "PeerFloodError from Telegram"
             db.commit()
 
             unlocked = False
-            # Check SpamBot only if at least 15 minutes since last check to prevent spamming
             now_t = time.time()
-            if now_t - self._last_spambot_checks.get(userbot.id, 0) > 900:
+            if now_t - self._last_spambot_checks.get(userbot.id, 0) > 300:
                 unlocked, status_msg, cd_time = await self.auto_heal_userbot_via_spambot(
                     db=db,
                     channel_id=channel_id,
@@ -598,12 +597,20 @@ class DedicatedUserbotService:
                 )
 
             if unlocked:
+                # SpamBot confirmed account is clean ("free as a bird").
+                # This means the error was specific to this recipient's privacy or temporary peer block!
+                userbot.status = "CONNECTED"
+                userbot.cooldown_until = None
+                userbot.last_error = None
+                db.commit()
+                # Apply human cool-off interval on this bot to avoid rapid repeated errors
+                self._last_message_times[bot_key] = time.time()
                 return {
                     "success": False,
-                    "error": "PEER_FLOOD_UNLOCKED",
-                    "error_ar": "تم فك تقييد الحساب تلقائياً عبر تيليجرام. ستتم إعادة المحاولة فوراً.",
-                    "can_retry": True,
-                    "retry_delay_seconds": 5
+                    "error": "PEER_RESTRICTED_RECIPIENT",
+                    "error_ar": "إعدادات خصوصية هذا المستخدم في تيليجرام تمنع استقبال الرسائل من غير جهات الاتصال.",
+                    "uncontactable_reason": "PRIVACY_RESTRICTED",
+                    "can_retry": False
                 }
             else:
                 return {
@@ -701,7 +708,7 @@ class DedicatedUserbotService:
 
         now_ts = time.time()
         last_chk = self._last_spambot_checks.get(bot_check_key, 0)
-        if not force and (now_ts - last_chk < 900):
+        if not force and (now_ts - last_chk < 300):
             logger.info(f"[🤖 SpamBot Auto-Healer]: Debounced check for {bot_label} (checked {int(now_ts - last_chk)}s ago).")
             return False, "CHECK_DEBOUNCED", userbot.cooldown_until if userbot else None
         self._last_spambot_checks[bot_check_key] = now_ts
