@@ -941,6 +941,15 @@ class RetentionEngine:
 
         res = {"success": False, "error": "NO_AVAILABLE_BOTS"}
 
+        # Partition bots: Ready vs Limited (enforce safe daily quota of 30)
+        ready_userbots = [
+            ub for ub in tenant_userbots
+            if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
+            and (ub.daily_contacts_count or 0) < 30
+            and ub.status == "CONNECTED"
+        ]
+        limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
+
         if assigned_bot_name:
             clean_assigned = assigned_bot_name.lstrip('@').lower()
             matching_bot = next(
@@ -974,15 +983,7 @@ class RetentionEngine:
                 )
 
         if not assigned_bot_name or (not res.get("success") and res.get("error") == "NO_DEDICATED_USERBOT"):
-            # Partition bots: Ready vs Limited
-            ready_userbots = [
-                ub for ub in tenant_userbots
-                if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-                and (ub.daily_contacts_count or 0) < 50
-                and ub.status == "CONNECTED"
-            ]
-            limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
-
+            ordered_userbots = []
             if ready_userbots:
                 # Sort for fair distribution
                 ready_userbots.sort(key=lambda ub: ub.id)
