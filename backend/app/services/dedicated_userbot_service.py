@@ -580,46 +580,18 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 60
             }
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Checking SpamBot auto-healer...")
+            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Setting safe FLOOD_WAIT cooldown (30 min) to protect account...")
             userbot.status = "FLOOD_WAIT"
-            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=900)
+            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
             userbot.last_error = "PeerFloodError from Telegram"
             db.commit()
-
-            unlocked = False
-            now_t = time.time()
-            if now_t - self._last_spambot_checks.get(userbot.id, 0) > 300:
-                unlocked, status_msg, cd_time = await self.auto_heal_userbot_via_spambot(
-                    db=db,
-                    channel_id=channel_id,
-                    userbot_id=userbot.id,
-                    client=client
-                )
-
-            if unlocked:
-                # SpamBot confirmed account is clean ("free as a bird").
-                # This means the error was specific to this recipient's privacy or temporary peer block!
-                userbot.status = "CONNECTED"
-                userbot.cooldown_until = None
-                userbot.last_error = None
-                db.commit()
-                # Apply human cool-off interval on this bot to avoid rapid repeated errors
-                self._last_message_times[bot_key] = time.time()
-                return {
-                    "success": False,
-                    "error": "PEER_RESTRICTED_RECIPIENT",
-                    "error_ar": "إعدادات خصوصية هذا المستخدم في تيليجرام تمنع استقبال الرسائل من غير جهات الاتصال.",
-                    "uncontactable_reason": "PRIVACY_RESTRICTED",
-                    "can_retry": False
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": "PEER_FLOOD",
-                    "error_ar": f"الحساب مقيد مؤقتاً من تيليجرام (PeerFlood)، ستتم التجربة عبر الحساب البديل.",
-                    "can_retry": True,
-                    "retry_delay_seconds": 900
-                }
+            return {
+                "success": False,
+                "error": "PEER_FLOOD",
+                "error_ar": "الحساب في فترة راحة مؤقتة من تيليجرام لحمايته من أي تقييد. ستتم المراسلة تلقائياً عبر الحساب الآخر أو بعد انتهاء فترة الراحة.",
+                "can_retry": True,
+                "retry_delay_seconds": 1800
+            }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))
             userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=wait)
@@ -760,12 +732,13 @@ class DedicatedUserbotService:
                 if clicked_why:
                     break
             if not clicked_why:
-                await client.send_message('@SpamBot', 'Why was I reported?')
+                logger.info(f"[SpamBot Auto-Healer]: Could not find 'Why was I reported?' button. Aborting automated dialogue to prevent bot abuse freeze.")
+                return False, "BUTTON_NOT_FOUND", None
 
             await asyncio.sleep(3)
             msgs2 = await client.get_messages('@SpamBot', limit=1)
 
-            # Step 2: Click 'I understand, thanks' or send text
+            # Step 2: Click 'I understand, thanks'
             clicked_thanks = False
             for row in ((msgs2[0].buttons if msgs2 else []) or []):
                 for btn in row:
@@ -777,7 +750,8 @@ class DedicatedUserbotService:
                 if clicked_thanks:
                     break
             if not clicked_thanks:
-                await client.send_message('@SpamBot', 'I understand, thanks')
+                logger.info(f"[SpamBot Auto-Healer]: Could not find 'I understand, thanks' button. Aborting automated dialogue.")
+                return False, "BUTTON_NOT_FOUND", None
 
             await asyncio.sleep(3)
 
