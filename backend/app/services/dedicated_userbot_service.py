@@ -362,35 +362,37 @@ class DedicatedUserbotService:
         if not userbot:
             return {"success": False, "error": "NO_DEDICATED_USERBOT", "can_retry": False}
 
-        # Check daily quota
+        # Check daily quota (Ultra-safe cap: max 12 cold messages/day per account)
         today = datetime.now(timezone.utc).date()
         if userbot.last_contact_date != today:
             userbot.last_contact_date = today
             userbot.daily_contacts_count = 0
             db.commit()
 
-        if userbot.daily_contacts_count >= 30:
+        SAFE_DAILY_LIMIT = 12
+        if (userbot.daily_contacts_count or 0) >= SAFE_DAILY_LIMIT:
             return {
                 "success": False,
                 "error": "DAILY_QUOTA_REACHED",
-                "error_ar": "تم بلوغ الحد الأقصى للمراسلات اليومية لهذا الحساب (30 رسالة) للحفاظ على أمانه التام ضد أي حظر.",
+                "error_ar": f"حماية تيليجرام الصارمة: تم بلوغ الحد الأقصى الآمن لهذا اليوم ({SAFE_DAILY_LIMIT} رسالة) لضمان حماية الحساب 100% من أي ليمت أو حظر.",
                 "can_retry": True,
                 "retry_delay_seconds": 3600
             }
 
-        # Safe Hourly Velocity Limiter (Max 8 cold messages/hour per bot)
+        # Safe Hourly Velocity Limiter (Max 3 cold messages/hour per bot)
         now_ts = time.time()
         bot_key = userbot.id or channel_id
         recent_timestamps = [t for t in self._hourly_message_timestamps.get(bot_key, []) if now_ts - t < 3600]
         self._hourly_message_timestamps[bot_key] = recent_timestamps
-        if len(recent_timestamps) >= 8:
+        SAFE_HOURLY_LIMIT = 3
+        if len(recent_timestamps) >= SAFE_HOURLY_LIMIT:
             oldest = min(recent_timestamps)
-            cooldown_sec = max(60, int(3600 - (now_ts - oldest)))
-            logger.info(f"[🛡️ Hourly Safety Cap]: Bot {userbot.username or bot_key} reached 8 messages this hour. Pausing for {cooldown_sec}s.")
+            cooldown_sec = max(180, int(3600 - (now_ts - oldest)))
+            logger.info(f"[🛡️ Hourly Safety Cap]: Bot {userbot.username or bot_key} reached {SAFE_HOURLY_LIMIT} messages this hour. Pausing for {cooldown_sec}s.")
             return {
                 "success": False,
                 "error": "HOURLY_RATE_LIMIT",
-                "error_ar": f"حماية تيليجرام التلقائية: تم إرسال الحد الأقصى الآمن لهذه الساعة (8 رسائل). فترة راحة مؤقتة لـ {cooldown_sec // 60} دقيقة لحماية الحساب من الليمت والسبام.",
+                "error_ar": f"حماية تيليجرام التلقائية: تم إرسال الحد الأقصى الآمن لهذه الساعة ({SAFE_HOURLY_LIMIT} رسائل). فترة راحة مؤقتة لـ {cooldown_sec // 60} دقيقة لحماية الحساب من الليمت والسبام.",
                 "can_retry": True,
                 "retry_delay_seconds": cooldown_sec
             }
@@ -406,7 +408,7 @@ class DedicatedUserbotService:
                 return {
                     "success": False,
                     "error": "ACCOUNT_COOLDOWN",
-                    "error_ar": f"الحساب في فترة راحة مؤقتة لـ {rem} ثانية.",
+                    "error_ar": f"الحساب في فترة راحة أمان لـ {rem} ثانية.",
                     "can_retry": True,
                     "retry_delay_seconds": rem
                 }
@@ -427,13 +429,13 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 300
             }
 
-        # Natural Human Anti-Spam Pacing (40.0 - 75.0s between cold sends on this account)
+        # Ultra-Safe Human Anti-Spam Pacing (240.0 - 480.0s = 4 to 8 minutes between cold sends on this account)
         last_sent = self._last_message_times.get(bot_key, 0.0)
         elapsed = time.time() - last_sent
-        target_interval = random.uniform(40.0, 75.0)
+        target_interval = random.uniform(240.0, 480.0)
         if elapsed < target_interval:
             wait_needed = target_interval - elapsed
-            logger.info(f"[☕ Human Pacing for {userbot.username or bot_key}]: Waiting {wait_needed:.1f}s before next contact to simulate natural human activity...")
+            logger.info(f"[☕ Ultra-Safe Human Pacing for {userbot.username or bot_key}]: Waiting {wait_needed/60:.1f} minutes before next contact to simulate genuine human activity...")
             await asyncio.sleep(wait_needed)
 
         try:
@@ -498,28 +500,47 @@ class DedicatedUserbotService:
                     except Exception:
                         entity = None
 
-                # 4. Fallback to raw user ID
-                if not entity:
+                # 4. Fallback to raw user ID - ONLY if safely resolvable by Telethon
+                if not entity or isinstance(entity, int):
                     try:
-                        entity = await client.get_entity(int(target_user_id))
-                    except Exception:
-                        entity = int(target_user_id)
+                        entity = await client.get_input_entity(int(target_user_id))
+                    except Exception as ent_err:
+                        logger.info(f"[🛡️ Safety Guard on {bot_key}]: Cannot safely resolve peer {target_user_id}: {ent_err}. Skipping to protect account trust score.")
+                        return {
+                            "success": False,
+                            "error": "CANNOT_RESOLVE_PEER",
+                            "error_ar": "تعذر مطابقة هذا العضو بأمان (لا يملك معرفاً عاماً ولا يتوفر هاش وصول صالح). تم تخطيه حماية للحساب.",
+                            "uncontactable_reason": "NO_SAFE_ACCESS_HASH",
+                            "can_retry": False
+                        }
 
-            # ── HUMAN BEHAVIOR SIMULATION ─────────────────────────────────────
-            # 1. Mark chat read / acknowledge open
+            # ── ADVANCED HUMAN BEHAVIOR SIMULATION ──────────────────────────────
+            # 1. Update presence to online
+            try:
+                from telethon.tl.functions.account import UpdateStatusRequest
+                await client(UpdateStatusRequest(offline=False))
+            except Exception:
+                pass
+
+            # 2. Mark chat read / acknowledge open
             try:
                 await client.send_read_acknowledge(entity)
             except Exception:
                 pass
 
-            # 2. Reading hesitation pause (simulating a human reading profile/chat)
-            await asyncio.sleep(random.uniform(2.5, 4.5))
+            # 3. Reading hesitation pause (simulating a human reading profile/chat: 3.5s - 6.5s)
+            await asyncio.sleep(random.uniform(3.5, 6.5))
 
-            # 3. Realistic typing action based on text length (~30 chars/second)
+            # 4. Realistic multi-stage typing action
             try:
-                typing_sec = min(7.5, max(3.0, (len(text) / 30.0) + random.uniform(0.5, 1.8)))
+                # Phase 1: initial typing
                 async with client.action(entity, 'typing'):
-                    await asyncio.sleep(typing_sec)
+                    await asyncio.sleep(random.uniform(2.5, 4.5))
+                # Phase 2: brief thought hesitation
+                await asyncio.sleep(random.uniform(1.2, 2.5))
+                # Phase 3: finish typing
+                async with client.action(entity, 'typing'):
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
             except Exception:
                 pass
 
@@ -580,17 +601,17 @@ class DedicatedUserbotService:
                 "retry_delay_seconds": 60
             }
         except PeerFloodError:
-            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Setting safe FLOOD_WAIT cooldown (30 min) to protect account...")
+            logger.warning(f"[⚠️ PeerFlood on {userbot.username}]: Setting 24h safety rest cooldown to protect account...")
             userbot.status = "FLOOD_WAIT"
-            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+            userbot.cooldown_until = datetime.now(timezone.utc) + timedelta(hours=24)
             userbot.last_error = "PeerFloodError from Telegram"
             db.commit()
             return {
                 "success": False,
                 "error": "PEER_FLOOD",
-                "error_ar": "الحساب في فترة راحة مؤقتة من تيليجرام لحمايته من أي تقييد. ستتم المراسلة تلقائياً عبر الحساب الآخر أو بعد انتهاء فترة الراحة.",
+                "error_ar": "الحساب في فترة راحة أمان كاملة (24 ساعة) لحمايته التامة من تيليجرام. لن يتم إرسال أي رسائل منه حتى إشعار آخر.",
                 "can_retry": True,
-                "retry_delay_seconds": 1800
+                "retry_delay_seconds": 86400
             }
         except FloodWaitError as fwe:
             wait = int(getattr(fwe, 'seconds', 60))

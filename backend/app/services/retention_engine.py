@@ -844,12 +844,12 @@ class RetentionEngine:
         user_seed = int(case.telegram_user_id) if str(case.telegram_user_id).isdigit() else 0
 
         default_variations = [
-            f"مرحباً {name}، لاحظنا مغادرتك لقناة {ch_title} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا جداً لتطوير القناة.",
-            f"أهلاً بك أخي {name}، نتمنى أن تكون بأحسن حال 🌸\nلاحظنا خروجك من قناة {ch_title}، ويهمنا جداً معرفة رأيك إذا كان هناك ما يمكننا تحسينه.",
-            f"السلام عليكم أخي {name}، افتقدناك في {ch_title} 💐\nهل غادرت القناة بالخطأ أم واجهتك مشكلة في المحتوى؟ رأيك وملاحظاتك تهمنا كثيراً.",
-            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة أو أمر واجهك لتطوير القناة.",
-            f"حياك الله أخي {name} 🌟\nلاحظنا ابتعادك عن {ch_title}، يهمنا جداً سماع رأيك وتجربتك معنا لمواصلة التحسين.",
-            f"أهلاً {name}، افتقدنا تواجدك في قناة {ch_title} 🌷\nنود التأكد إذا كان خروجك غير مقصود أو إذا كان لديك أي اقتراح لتحسين المحتوى."
+            f"مرحباً {name}، لاحظنا مغادرتك لقناة {ch_title} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا لتطوير القناة.\n(إذا أزعجتك رسالتنا نعتذر منك بشدة 🌸)",
+            f"أهلاً بك أخي {name}، نتمنى أن تكون بأحسن حال 🌸\nلاحظنا خروجك من قناة {ch_title}، ويهمنا جداً معرفة رأيك إذا كان هناك ما يمكننا تحسينه.\n(عذراً للإزعاج إذا وصلتك الرسالة بالخطأ 🌹)",
+            f"السلام عليكم أخي {name}، افتقدناك في {ch_title} 💐\nهل غادرت القناة بالخطأ أم واجهتك ملاحظة في المحتوى؟ رأيك يهمنا كثيراً.\n(نعتذر بشدة إن سببت لك هذه الرسالة أي إزعاج 🌷)",
+            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة واجهتك لتطوير القناة.\n(إذا كنت لا ترغب بأي رسائل نعتذر منك 🌸)",
+            f"حياك الله أخي {name} 🌟\nلاحظنا ابتعادك عن {ch_title}، يهمنا جداً سماع رأيك وتجربتك معنا لمواصلة التحسين.\n(عذراً على الإزعاج يا غالي 🌹)",
+            f"أهلاً {name}، افتقدنا تواجدك في قناة {ch_title} 🌷\nنود التأكد إذا كان خروجك غير مقصود أو إذا كان لديك أي اقتراح لتحسين المحتوى.\n(نعتذر منك جداً إن كان في الرسالة أي إزعاج 💐)"
         ]
 
         # Use natural randomized variation for default template to protect accounts from identical message limits
@@ -941,12 +941,13 @@ class RetentionEngine:
 
         res = {"success": False, "error": "NO_AVAILABLE_BOTS"}
 
-        # Partition bots: Ready vs Limited (enforce safe daily quota of 30)
+        # Partition bots: Ready vs Limited (enforce ultra-safe daily quota of 12)
         ready_userbots = [
             ub for ub in tenant_userbots
             if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-            and (ub.daily_contacts_count or 0) < 30
+            and (ub.daily_contacts_count or 0) < 12
             and ub.status == "CONNECTED"
+            and ub.is_active == True
         ]
         limited_userbots = [ub for ub in tenant_userbots if ub not in ready_userbots]
 
@@ -1157,8 +1158,9 @@ class RetentionEngine:
             ready_userbots = [
                 ub for ub in tenant_userbots
                 if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-                and (ub.daily_contacts_count or 0) < 30
+                and (ub.daily_contacts_count or 0) < 12
                 and ub.status == "CONNECTED"
+                and ub.is_active == True
             ]
 
             if not ready_userbots:
@@ -1245,9 +1247,9 @@ class RetentionEngine:
 
                         if res.get("success"):
                             sent_total += 1
-                            # Human jitter pause between sends on this account (45.0s - 85.0s)
-                            post_pause = random.uniform(45.0, 85.0)
-                            logger.info(f"[☕ Parallel Account Pacing (@{bot_name})]: Sent successfully. Pausing {post_pause:.1f}s for human simulation...")
+                            # Ultra-Safe human jitter pause between sends on this account (240.0s - 480.0s = 4 to 8 minutes)
+                            post_pause = random.uniform(240.0, 480.0)
+                            logger.info(f"[☕ Ultra-Safe Account Pacing (@{bot_name})]: Sent successfully. Pausing {post_pause/60:.1f} minutes for human simulation...")
                             await asyncio.sleep(post_pause)
                         elif res.get("error_code") in ["PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN", "HOURLY_RATE_LIMIT", "ASSIGNED_BOT_LIMITED"]:
                             logger.warning(f"[⚠️ Account @{bot_name} Paused]: {res.get('error_code')}. Stopping this account's batch.")
