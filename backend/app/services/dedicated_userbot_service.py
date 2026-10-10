@@ -44,6 +44,19 @@ class DedicatedUserbotService:
         self._last_spambot_checks: Dict[str, float] = {}
         self._hourly_message_timestamps: Dict[str, list] = {}
 
+    def get_dynamic_daily_limit(self, userbot: ChannelUserbot) -> int:
+        """
+        Dynamically calculates a safe randomized daily threshold between 8 and 12
+        for this account on the current calendar day (UTC).
+        Prevents static velocity patterns across accounts.
+        """
+        import hashlib, random
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        seed_str = f"quota_{userbot.id}_{userbot.phone}_{today_str}"
+        seed_int = int(hashlib.sha256(seed_str.encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed_int)
+        return rng.randint(8, 12)
+
     async def send_login_code(
         self,
         db: Session,
@@ -369,12 +382,12 @@ class DedicatedUserbotService:
             userbot.daily_contacts_count = 0
             db.commit()
 
-        SAFE_DAILY_LIMIT = 12
+        SAFE_DAILY_LIMIT = self.get_dynamic_daily_limit(userbot)
         if (userbot.daily_contacts_count or 0) >= SAFE_DAILY_LIMIT:
             return {
                 "success": False,
                 "error": "DAILY_QUOTA_REACHED",
-                "error_ar": f"حماية تيليجرام الصارمة: تم بلوغ الحد الأقصى الآمن لهذا اليوم ({SAFE_DAILY_LIMIT} رسالة) لضمان حماية الحساب 100% من أي ليمت أو حظر.",
+                "error_ar": f"حماية تيليجرام الصارمة: تم بلوغ الحد الأقصى الآمن لهذا اليوم ({SAFE_DAILY_LIMIT} رسائل) لضمان حماية الحساب 100% من أي ليمت أو حظر.",
                 "can_retry": True,
                 "retry_delay_seconds": 3600
             }
@@ -528,19 +541,23 @@ class DedicatedUserbotService:
             except Exception:
                 pass
 
-            # 3. Reading hesitation pause (simulating a human reading profile/chat: 3.5s - 6.5s)
-            await asyncio.sleep(random.uniform(3.5, 6.5))
+            # 3. Reading hesitation pause (simulating a human reading profile/chat: 3.8s - 7.5s)
+            await asyncio.sleep(random.uniform(3.8, 7.5))
 
-            # 4. Realistic multi-stage typing action
+            # 4. Realistic human typing simulation proportional to text length
             try:
-                # Phase 1: initial typing
+                text_len = len(text)
+                # Human typing in Arabic: ~18-35 chars per sec with pauses
+                typing_total_sec = min(12.0, max(3.5, text_len * random.uniform(0.04, 0.08)))
+                phase1 = typing_total_sec * random.uniform(0.4, 0.6)
+                phase2_pause = random.uniform(1.2, 2.8) # thought hesitation
+                phase3 = max(1.5, typing_total_sec - phase1)
+
                 async with client.action(entity, 'typing'):
-                    await asyncio.sleep(random.uniform(2.5, 4.5))
-                # Phase 2: brief thought hesitation
-                await asyncio.sleep(random.uniform(1.2, 2.5))
-                # Phase 3: finish typing
+                    await asyncio.sleep(phase1)
+                await asyncio.sleep(phase2_pause)
                 async with client.action(entity, 'typing'):
-                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    await asyncio.sleep(phase3)
             except Exception:
                 pass
 

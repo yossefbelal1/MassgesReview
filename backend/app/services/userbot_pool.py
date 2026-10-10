@@ -21,7 +21,7 @@ from backend.app.core.config import settings
 logger = logging.getLogger("reviewflow.userbot_pool")
 
 class UserbotSession:
-    def __init__(self, name: str, get_client_fn: Callable[[], Any], max_daily_contacts: int = 35):
+    def __init__(self, name: str, get_client_fn: Callable[[], Any], max_daily_contacts: int = 10):
         self.name = name
         self.get_client_fn = get_client_fn
         self.max_daily_contacts = max_daily_contacts

@@ -829,7 +829,7 @@ async def get_userbots_status(
             "is_healthy": ub.status == "CONNECTED" and ub.is_active,
             "status": ub.status,
             "daily_contacts_sent": ub.daily_contacts_count or 0,
-            "max_daily_contacts": 35,
+            "max_daily_contacts": dedicated_userbot_service.get_dynamic_daily_limit(ub),
             "in_cooldown": bool(ub_cd and ub_cd > now),
             "cooldown_until": ub_cd.isoformat() if ub_cd else None,
             "created_at": ub.created_at.isoformat() if ub.created_at else None

@@ -847,29 +847,127 @@ class RetentionEngine:
                 new_words[-1] = new_words[-1] + zw
         return " ".join(new_words)
 
+    def _generate_spintax_recovery_message(self, name: str, ch_title: str, invite_url: str, user_seed: int) -> str:
+        """
+        Generates mathematically diverse, natural Arabic conversational recovery text
+        yielding >250,000 combinatorial variants while strictly guaranteeing that
+        the channel invite link is included in every single outbound variant.
+        """
+        import random
+        rng = random.Random(user_seed)
+
+        greetings = [
+            f"مرحباً {name}",
+            f"أهلاً بك {name}",
+            f"أهلاً وسهلاً {name}",
+            f"السلام عليكم ورحمة الله أخي {name}",
+            f"السلام عليكم {name}",
+            f"يا هلا {name}",
+            f"حياك الله أخي {name}",
+            f"أهلاً ومرحباً {name}",
+            f"مساك الله بالخير {name}",
+            f"أسعد الله أوقاتك {name}",
+        ]
+
+        tone_markers = [
+            "العزيز 🌹",
+            "يا غالي 🌸",
+            "الحبيب 💐",
+            "الكريم 🌷",
+            "🌹",
+            "🌸",
+            "💐",
+            "✨",
+            "",
+        ]
+
+        observations = [
+            f"لاحظنا مغادرتك لقناة {ch_title}",
+            f"انتبهنا لخروجك من قناة {ch_title}",
+            f"افتقدنا تواجدك معنا في {ch_title}",
+            f"شفنا أنك غادرت {ch_title}",
+            f"يعز علينا مغادرتك لقناة {ch_title}",
+            f"لاحظنا ابتعادك عن {ch_title}",
+            f"مكانك محفوظ وافتقدناك في {ch_title}",
+            f"انتبهنا أنك تركت {ch_title}",
+        ]
+
+        inquiries = [
+            "وحبينا نتطمن عليك ونعرف لو خرجت بالخطأ أو كان هناك أمر أزعجك؟",
+            "وحبينا نسأل لو في أي مشكلة واجهتك أو خرجت بدون قصد؟",
+            "ويهمنا جداً معرفة رأيك إذا كان المحتوى يحتاج تحسين أو خرجت سهواً.",
+            "وحبينا نستفسر إذا واجهتك أي ملاحظة في القناة لتطويرها، ورأيك يهمنا جداً.",
+            "وحبينا نتأكد إن كانت المغادرة غير مقصودة، ونسعد بأي ملاحظة لتطوير المحتوى.",
+            "ويهمنا سماع رأيك وتجربتك معنا لمواصلة التحسين وتجنب أي تقصير.",
+            "ونتمنى نعرف لو كان في سبب معين أو خرجت بالغلط، فرأيك محل اهتمامنا.",
+        ]
+
+        invite_phrasings = [
+            f"لو حابب ترجع يشرفنا وجودك دائماً من هذا الرابط:\n{invite_url}",
+            f"رابط القناة متاح لك بأي وقت إذا كنت حابب ترجع:\n{invite_url}",
+            f"تقدر تنضم من جديد في أي لحظة عبر الرابط التالي:\n{invite_url}",
+            f"باب القناة مفتوح لك بأي وقت عبر هذا الرابط:\n{invite_url}",
+            f"يشرفنا انضمامك مجدداً متى ما أحببت من هنا:\n{invite_url}",
+            f"تفضل رابط القناة إذا خرجت بالخطأ وأردت العودة:\n{invite_url}",
+            f"رابط الرجوع للقناة متوفر هنا دائماً:\n{invite_url}",
+        ]
+
+        closings = [
+            "(إذا كانت الرسالة غير مناسبة نعتذر منك بشدة 🌸)",
+            "(عذراً للإزعاج إذا وصلتك الرسالة بالخطأ 🌹)",
+            "(نعتذر جداً إن سببت لك هذه الرسالة أي إزعاج 💐)",
+            "(إذا كنت تفضل عدم التواصل نعتذر منك ونحترم رغبتك 🌸)",
+            "(عذراً على الإزعاج يا غالي، يومك مبارك 🌷)",
+            "(حقك علينا إذا سببت لك أي إزعاج 🌹)",
+            "(كل التقدير والاحترام لك 🌸)",
+        ]
+
+        g = rng.choice(greetings)
+        tm = rng.choice(tone_markers)
+        head = f"{g} {tm}".strip() if tm else g
+
+        obs = rng.choice(observations)
+        inq = rng.choice(inquiries)
+        body = f"{obs} {inq}"
+
+        inv = rng.choice(invite_phrasings) if invite_url else ""
+        close = rng.choice(closings)
+
+        parts = [head, body]
+        if inv:
+            parts.append(inv)
+        parts.append(close)
+
+        return "\n\n".join(p for p in parts if p)
+
     def build_recovery_outbound_text(self, channel: Optional[Channel], settings: Optional[RetentionSetting], case: RecoveryCase) -> str:
         """Builds customized recovery text with placeholders substituted and anti-hash fingerprinting."""
         first_name = case.member.first_name if case.member else "يا غالي"
         ch_title = channel.title if channel else ""
         name = first_name or "يا غالي"
-        invite_url = settings.invite_link if (settings and settings.invite_link) else ""
+
+        # Guarantee invite link from settings, channel username, or channel invite link
+        invite_url = ""
+        if settings and settings.invite_link and settings.invite_link.strip():
+            invite_url = settings.invite_link.strip()
+        elif channel:
+            if channel.username and channel.username.strip():
+                clean_u = channel.username.strip().lstrip('@')
+                invite_url = f"https://t.me/{clean_u}"
+            elif channel.invite_link and channel.invite_link.strip():
+                invite_url = channel.invite_link.strip()
+
         user_seed = int(case.telegram_user_id) if str(case.telegram_user_id).isdigit() else 0
 
-        default_variations = [
-            f"مرحباً {name}، لاحظنا مغادرتك لقناة {ch_title} وحبينا نتطمن عليك 🌹\nهل خرجت بالخطأ أو كان هناك أمر أزعجك؟ رأيك يهمنا لتطوير القناة.\n(إذا أزعجتك رسالتنا نعتذر منك بشدة 🌸)",
-            f"أهلاً بك أخي {name}، نتمنى أن تكون بأحسن حال 🌸\nلاحظنا خروجك من قناة {ch_title}، ويهمنا جداً معرفة رأيك إذا كان هناك ما يمكننا تحسينه.\n(عذراً للإزعاج إذا وصلتك الرسالة بالخطأ 🌹)",
-            f"السلام عليكم أخي {name}، افتقدناك في {ch_title} 💐\nهل غادرت القناة بالخطأ أم واجهتك ملاحظة في المحتوى؟ رأيك يهمنا كثيراً.\n(نعتذر بشدة إن سببت لك هذه الرسالة أي إزعاج 🌷)",
-            f"مرحباً {name} العزيز 🌹\nلاحظنا مغادرتك لقناة {ch_title} وحبينا نستفسر إذا كانت هناك أي ملاحظة واجهتك لتطوير القناة.\n(إذا كنت لا ترغب بأي رسائل نعتذر منك 🌸)",
-            f"حياك الله أخي {name} 🌟\nلاحظنا ابتعادك عن {ch_title}، يهمنا جداً سماع رأيك وتجربتك معنا لمواصلة التحسين.\n(عذراً على الإزعاج يا غالي 🌹)",
-            f"أهلاً {name}، افتقدنا تواجدك في قناة {ch_title} 🌷\nنود التأكد إذا كان خروجك غير مقصود أو إذا كان لديك أي اقتراح لتحسين المحتوى.\n(نعتذر منك جداً إن كان في الرسالة أي إزعاج 💐)"
-        ]
+        # Check if custom template was supplied and is not the default
+        is_custom = (
+            settings
+            and settings.recovery_first_message_template
+            and "مرحباً {name}، لاحظنا مغادرتك" not in settings.recovery_first_message_template
+        )
 
-        # Use natural randomized variation for default template to protect accounts from identical message limits
-        if not settings or not settings.recovery_first_message_template or "مرحباً {name}، لاحظنا مغادرتك" in settings.recovery_first_message_template:
-            pick_idx = user_seed % len(default_variations)
-            base_text = default_variations[pick_idx]
-            if invite_url:
-                base_text = f"{base_text}\n\n{invite_url}"
+        if not is_custom:
+            base_text = self._generate_spintax_recovery_message(name, ch_title, invite_url, user_seed)
             return self._inject_anti_hash_fingerprint(base_text, user_seed)
 
         template = settings.recovery_first_message_template
@@ -953,11 +1051,11 @@ class RetentionEngine:
 
         res = {"success": False, "error": "NO_AVAILABLE_BOTS"}
 
-        # Partition bots: Ready vs Limited (enforce ultra-safe daily quota of 12)
+        # Partition bots: Ready vs Limited (enforce ultra-safe dynamic daily quota 8-12)
         ready_userbots = [
             ub for ub in tenant_userbots
             if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-            and (ub.daily_contacts_count or 0) < 12
+            and (ub.daily_contacts_count or 0) < dedicated_userbot_service.get_dynamic_daily_limit(ub)
             and ub.status == "CONNECTED"
             and ub.is_active == True
         ]
@@ -1170,7 +1268,7 @@ class RetentionEngine:
             ready_userbots = [
                 ub for ub in tenant_userbots
                 if (not ub.cooldown_until or self._to_utc(ub.cooldown_until) <= now)
-                and (ub.daily_contacts_count or 0) < 12
+                and (ub.daily_contacts_count or 0) < dedicated_userbot_service.get_dynamic_daily_limit(ub)
                 and ub.status == "CONNECTED"
                 and ub.is_active == True
             ]
@@ -1250,6 +1348,14 @@ class RetentionEngine:
                 bot_name = bot_obj.username or bot_obj.phone
                 try:
                     for cid in case_ids:
+                        # Check real-time quota for this account
+                        fresh_bot = worker_db.query(ChannelUserbot).filter(ChannelUserbot.id == bot_obj.id).first()
+                        if fresh_bot:
+                            daily_quota = dedicated_userbot_service.get_dynamic_daily_limit(fresh_bot)
+                            if (fresh_bot.daily_contacts_count or 0) >= daily_quota:
+                                logger.info(f"[🛑 Daily Dynamic Cap Reached (@{bot_name})]: Reached dynamic quota ({fresh_bot.daily_contacts_count}/{daily_quota}) for today. Halting.")
+                                break
+
                         fresh_case = worker_db.query(RecoveryCase).filter(RecoveryCase.id == cid).first()
                         if not fresh_case or fresh_case.status != "SCHEDULED":
                             continue
@@ -1259,16 +1365,22 @@ class RetentionEngine:
 
                         if res.get("success"):
                             sent_total += 1
-                            # Ultra-Safe human jitter pause between sends on this account (240.0s - 480.0s = 4 to 8 minutes)
-                            post_pause = random.uniform(240.0, 480.0)
-                            logger.info(f"[☕ Ultra-Safe Account Pacing (@{bot_name})]: Sent successfully. Pausing {post_pause/60:.1f} minutes for human simulation...")
-                            await asyncio.sleep(post_pause)
-                        elif res.get("error_code") in ["PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN", "HOURLY_RATE_LIMIT", "ASSIGNED_BOT_LIMITED"]:
+                            # Check if we should take a natural human coffee/break pause every 2-3 sends
+                            if sent_total % random.choice([2, 3]) == 0 and len(case_ids) > sent_total:
+                                break_pause = random.uniform(1080.0, 2100.0)  # 18 to 35 minutes
+                                logger.info(f"[☕ Human Coffee Break (@{bot_name})]: Sent {sent_total} messages. Simulating natural human break for {break_pause/60:.1f} minutes...")
+                                await asyncio.sleep(break_pause)
+                            else:
+                                # Non-linear human jitter (5 to 12 minutes)
+                                post_pause = random.uniform(300.0, 720.0)
+                                logger.info(f"[⏱️ Non-linear Pacing (@{bot_name})]: Sent successfully. Pausing {post_pause/60:.1f} minutes for human simulation...")
+                                await asyncio.sleep(post_pause)
+                        elif res.get("error_code") in ["PEER_FLOOD", "FLOOD_WAIT", "ACCOUNT_COOLDOWN", "HOURLY_RATE_LIMIT", "ASSIGNED_BOT_LIMITED", "DAILY_QUOTA_REACHED"]:
                             logger.warning(f"[⚠️ Account @{bot_name} Paused]: {res.get('error_code')}. Stopping this account's batch.")
                             break
                         else:
                             # Short pause for uncontactable or temporary skips
-                            await asyncio.sleep(random.uniform(3.0, 6.0))
+                            await asyncio.sleep(random.uniform(4.0, 8.0))
                 except Exception as worker_err:
                     logger.error(f"[Worker Exception on @{bot_name}]: {worker_err}", exc_info=True)
                 finally:

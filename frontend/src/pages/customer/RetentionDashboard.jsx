@@ -2584,9 +2584,9 @@ export default function RetentionDashboard({ onNavigate, externalTab, onTabChang
                       <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
                         <div
                           className={`h-full rounded-full transition-all duration-500 ${
-                            (b.daily_contacts_sent || 0) >= 30 ? 'bg-amber-500' : 'bg-emerald-500'
+                            (b.daily_contacts_sent || 0) >= (b.max_daily_contacts || 10) ? 'bg-amber-500' : 'bg-emerald-500'
                           }`}
-                          style={{ width: `${Math.min(100, ((b.daily_contacts_sent || 0) / b.max_daily_contacts) * 100)}%` }}
+                          style={{ width: `${Math.min(100, ((b.daily_contacts_sent || 0) / (b.max_daily_contacts || 10)) * 100)}%` }}
                         />
                       </div>
                       <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
