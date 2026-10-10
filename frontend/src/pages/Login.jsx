@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Zap, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
+import { Zap, Lock, Mail, ArrowRight, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 export default function Login({ onSwitchToRegister }) {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -14,7 +15,7 @@ export default function Login({ onSwitchToRegister }) {
     try {
       setLoading(true);
       setError('');
-      await login(email, password);
+      await login(email.trim(), password.trim());
     } catch (err) {
       setError(err.response?.data?.detail || 'البريد الإلكتروني أو كلمة المرور غير صحيحة');
     } finally {
@@ -66,13 +67,21 @@ export default function Login({ onSwitchToRegister }) {
             <div className="relative">
               <Lock className="w-4 h-4 text-slate-500 absolute right-3.5 top-3.5" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pr-10 pl-4 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none transition-colors"
+                className="w-full pr-10 pl-11 py-3 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-white text-sm outline-none transition-colors"
                 required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute left-3.5 top-3 text-slate-500 hover:text-slate-300 transition-colors p-0.5"
+                title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 

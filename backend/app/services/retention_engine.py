@@ -181,6 +181,12 @@ class RetentionEngine:
         if not settings.is_retention_enabled:
             return 0
 
+        # If channel previously had permission denied, back off for 10 minutes to prevent log spam
+        if channel.sync_status == "PERMISSION_DENIED" and channel.last_admin_log_sync_at:
+            last_sync = self._to_utc(channel.last_admin_log_sync_at)
+            if (datetime.now(timezone.utc) - last_sync).total_seconds() < 600:
+                return 0
+
         # Ensure we have an admin client capable of reading the admin log
         active_client = await self.get_admin_client_for_channel(channel, client)
 
@@ -341,8 +347,14 @@ class RetentionEngine:
             db.commit()
 
         except Exception as err:
-            logger.error(f"[!] Error fetching admin log for {channel.title}: {err}", exc_info=True)
-            channel.sync_status = "ERROR"
+            err_msg = str(err)
+            if "ChatAdminRequired" in type(err).__name__ or "admin privileges" in err_msg.lower():
+                logger.warning(f"[!] Channel '{channel.title}' missing admin permissions for Recent Actions. Setting sync_status=PERMISSION_DENIED and pausing checks for 10m.")
+                channel.sync_status = "PERMISSION_DENIED"
+                channel.last_admin_log_sync_at = datetime.now(timezone.utc)
+            else:
+                logger.error(f"[!] Error fetching admin log for {channel.title}: {err}", exc_info=True)
+                channel.sync_status = "ERROR"
             try:
                 db.commit()
             except Exception:
